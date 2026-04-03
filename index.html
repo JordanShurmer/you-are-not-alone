@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>You Are Not Alone</title>
+    <style>
+
+    :root {
+        /* Theme color */
+        --light-theme: #123524;
+        --theme: var(--light-theme);
+
+        /* darkened to almost 0 */
+        --game-dark: oklab(from var(--theme) 10% a b);
+        --game-light: color-mix(in oklab, var(--theme) 24%, var(--fg));
+
+        /* Base colors */
+        --bg: #f4f1ea;
+        --fg: #2a2520;
+
+        /* Box and card backgrounds */
+        --box-bg: #f5f0e8;
+        --card-bg: color-mix(in oklab, var(--theme) 15%, var(--box-bg));
+
+        /* Shadows */
+        --box-shadow: 10px 8px 1px color-mix(in oklab, var(--bg) 30%, var(--theme));
+        --box-border: 1px solid color-mix(in oklab, var(--bg) 50%, var(--theme));
+        --card-shadow: color-mix(in oklab, var(--fg) 20%, var(--theme));
+    }
+
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --bg: #2a2520;
+            --fg: #f4f1ea;
+
+            /* a bold pastel light green */
+            --theme: #6fb37f;
+
+            /* a darker box bg for dark theme */
+            --box-bg: #1a1510;
+            --card-bg: color-mix(in oklab, var(--theme) 15%, var(--box-bg));
+        }
+    }
+
+
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        line-height: 1.6;
+
+
+        background-color: var(--bg);
+        background-image: radial-gradient(circle, var(--theme) 1px, transparent 1px);
+        background-size: 20px 20px;
+        background-position: 10px 10px;
+    }
+
+    label {
+        display: flex;
+        flex-direction: column;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        color: var(--theme);
+    }
+    strong {
+        font-weight: bolder;
+    }
+
+    fieldset {
+        border-color: var(--theme);
+        legend {
+            color: var(--theme);
+            font-weight: bold;
+
+        }
+    }
+
+
+
+    .box {
+        background-color: var(--box-bg);
+        color: var(--fg);
+        box-shadow: var(--box-shadow);
+        border: var(--box-border);
+        padding-block: 1.618lh;
+        padding-inline: 2ch;
+    }
+
+    .card {
+        background-color: var(--card-bg);
+        box-shadow: var(--card-shadow);
+        padding-block: 0.8lh;
+        padding-inline: 1ch;
+    }
+
+    main {
+        width: 100vw;
+        height: 100dvh;
+
+        margin-inline: auto;
+        padding-block: 1.618lh;
+        padding-inline: 2ch;
+
+        /* a long column*/
+        display: grid;
+        grid-template-rows: 10dvh 1fr;
+        grid-template-columns: 1fr auto;
+        grid-template-areas:
+          "title ."
+          "game controls"
+        ;
+
+        row-gap: 1.618lh;
+        column-gap: 4ch;
+        place-items: stretch;
+        justify-items: stretch;
+    }
+
+    .box:has(h1) { grid-area: title; }
+    .box:has(#game) {
+        padding: 0;
+        align-self: stretch;
+        grid-area: game;
+    }
+    .box:has(#controls) { grid-area: controls; }
+
+    #controls {
+        width: 33ch;
+        height: 100%;
+    }
+
+    #game {
+        background: none;
+    }
+
+    </style>
+</head>
+<body>
+
+    <main>
+
+        <div class="box">
+            <h1>You are <strong>not</strong> alone</h1>
+        </div>
+
+        <div class="box">
+            <canvas id="game"></canvas>
+        </div>
+
+
+        <div hidden class="box">
+
+            <fieldset id="controls">
+                <legend>Controls</legend>
+
+                    <label>
+                        Vision Distance
+                        <input type="range" id="visionDistance" name="visionDistance" step="0.2" min="0" max="900" value="50">
+                    </label>
+
+                    <label>
+                        Vision Angle
+                        <input type="range" id="visionAngle" name="visionAngle" min="0" max="6.283185307179586" step="0.01" value="1.0471975511965976">
+                    </label>
+
+                    <label>
+                        Vision X
+                        <input type="range" id="visionX" name="visionX" min="-400" max="400" step="1" value="0">
+                    </label>
+
+                    <label>
+                        Vision Y
+                        <input type="range" id="visionY" name="visionY" min="-400" max="400" step="1" value="0">
+
+                    </label>
+
+
+
+            </fieldset>
+        </div>
+    </main>
+
+
+    <script type="module" src="/game.js"></script>
+
+
+</body>
+</html>
