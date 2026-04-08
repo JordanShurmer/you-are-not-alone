@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+import sys
+from PIL import Image
+import numpy as np
+from collections import deque
+
+def flood_fill_transparent(data, start_x, start_y, tol):
+    h, w = data.shape[:2]
+    visited = np.zeros((h, w), dtype=bool)
+    queue = deque()
+    queue.append((start_y, start_x))
+    seed = data[start_y, start_x, :3].copy()
+    ref = np.array([236, 233, 222])
+    while queue:
+        y, x = queue.popleft()
+        if visited[y, x]:
+            continue
+        visited[y, x] = True
+        pixel = data[y, x, :3]
+        if (np.sqrt(np.sum((pixel - seed) ** 2)) > tol and
+                np.sqrt(np.sum((pixel - ref) ** 2)) > tol):
+            continue
+        data[y, x, 3] = 0
+        for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            ny, nx = y + dy, x + dx
+            if 0 <= ny < h and 0 <= nx < w and not visited[ny, nx]:
+                queue.append((ny, nx))
+
+def process(input_path, output_path, tolerance=50):
+    img = Image.open(input_path).convert('RGBA')
+    data = np.array(img, dtype=np.int32)
+    h, w = data.shape[:2]
+    for corner in [(0, 0), (0, w - 1), (h - 1, 0), (h - 1, w - 1)]:
+        flood_fill_transparent(data, corner[1], corner[0], tolerance)
+    img = Image.fromarray(data.astype(np.uint8), 'RGBA')
+    bbox = img.split()[3].getbbox()
+    if bbox:
+        img = img.crop(bbox)
+    img.save(output_path)
+    print(f'{input_path} -> {output_path}: {(w, h)} -> {img.size}')
+
+if __name__ == '__main__':
+    if len(sys.argv) != 3:
+        print(f'Usage: {sys.argv[0]} input.png output.png')
+        sys.exit(1)
+    process(sys.argv[1], sys.argv[2])

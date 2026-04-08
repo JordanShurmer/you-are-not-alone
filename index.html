@@ -141,6 +141,60 @@
         background: none;
     }
 
+    .shroud {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 92%);
+        pointer-events: none;
+        z-index: 10;
+    }
+
+    vision {
+        --visionX: 50%;
+        --visionY: 50%;
+        display: contents;
+    }
+
+    .vision {
+        position: fixed;
+        pointer-events: none;
+        z-index: 20;
+
+        --visionDistance: 420px;
+        --visionSpread: 420px;
+
+        mix-blend-mode: overlay;
+
+        top: calc(var(--visionY) - var(--visionSpread) / 2);
+        left: calc(var(--visionX) - var(--visionDistance) / 2);
+        height: var(--visionSpread);
+        width: var(--visionDistance);
+        border-radius: 50%;
+
+        background: conic-gradient(
+                        from calc(365deg + var(--visionAngle)) at center,
+                        transparent 0deg,
+                        white 90deg,
+                        white 109deg,
+                        transparent 180deg
+                    ),
+                    radial-gradient(
+                        circle 400px at center,
+                        white 0%,
+                        rgba(10, 10, 10, 0.98) 100%
+                    );
+
+
+
+
+
+    }
+
+
+
     </style>
 </head>
 <body>
@@ -188,9 +242,15 @@
         </div>
     </main>
 
+    <aside hidden>
+        <img src="/wiz-t.png" id="wiz" />
+        <img src="/terrain/bushes1-t.png" id="bush1" />
+    </aside>
+
 
     <script type="module" src="/game.js"></script>
 
+    <div class="shroud"></div>
 
 </body>
 </html>
