@@ -119,7 +119,13 @@ export function createPlayer(x = 400, y = 300) {
     velocity: { x: 0, y: 0 },
 
     // physics — populated by update.js each frame
-    physics: { onGround: false },
+    physics: {
+      onGround: false,
+      moveInput: 0,
+      jumpBufferTimer: 0,
+      coyoteTimer: 0,
+      jumpHeld: false,
+    },
 
     image: {
       width: PLAYER_WIDTH,

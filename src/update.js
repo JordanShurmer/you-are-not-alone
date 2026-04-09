@@ -1,28 +1,62 @@
-// update.js — Phase 3: action processing + physics simulation.
+// update.js — movement + physics simulation.
 //
-// Improvements in this version:
-//   - Tighter timestep handling with bounded frame dt + sub-stepping
-//   - Shared tile-overlap helpers to remove duplicated collision math
-//   - Uses box offsets for collision extents (future-proof for non-centered boxes)
+// Goals of this refactor:
+//   - Acceleration-based horizontal movement (instead of instant velocity set)
+//   - Slower, more deliberate ramp-up for a purposeful feel
+//   - Buffered jumps + coyote time for fluid, forgiving platforming
+//   - Smooth ground/air transitions while preserving collision correctness
 
 import { entities, getEntity } from './entities.js';
 import { isSolid, getTileSize, isWorldLoaded } from './world.js';
 
 // ---------------------------------------------------------------------------
-// Constants
+// Tunable movement constants
 // ---------------------------------------------------------------------------
 
-/** Horizontal movement speed in px/s. */
-const PLAYER_SPEED = 220;
+/** Max horizontal run speed (px/s). */
+const MAX_RUN_SPEED = 250;
+
+/** Ground acceleration toward target speed (px/s²). */
+const GROUND_ACCEL = 1100;
+
+/** Ground deceleration when no input (px/s²). */
+const GROUND_DECEL = 1500;
+
+/** Air acceleration toward target speed (px/s²). */
+const AIR_ACCEL = 700;
+
+/** Air deceleration when no input (px/s²). */
+const AIR_DECEL = 420;
+
+/** Extra acceleration when reversing direction for responsive turns. */
+const TURN_ACCEL_MULT = 1.25;
 
 /** Downward acceleration in px/s². */
-const GRAVITY = 1600;
+const GRAVITY = 1750;
 
-/** Upward velocity on jump in px/s. */
-const JUMP_SPEED = 680;
+/** Upward jump impulse in px/s. */
+const JUMP_SPEED = 700;
 
 /** Terminal fall speed in px/s. */
-const MAX_FALL_SPEED = 1400;
+const MAX_FALL_SPEED = 1450;
+
+/** Small horizontal damping when landing without input. */
+const LANDING_DRAG = 0.82;
+
+/** Jump input can be buffered this long (seconds). */
+const JUMP_BUFFER_TIME = 0.12;
+
+/** Allow jump shortly after leaving ground (seconds). */
+const COYOTE_TIME = 0.1;
+
+/** Max upward speed retained when jump is released early (px/s). */
+const JUMP_CUT_SPEED_CAP = 260;
+
+/** Extra gravity while rising without jump hold (short-hop behavior). */
+const LOW_JUMP_GRAVITY_MULT = 2.2;
+
+/** Slightly stronger gravity while falling for snappier arcs. */
+const FALL_GRAVITY_MULT = 1.12;
 
 /** Hard cap for a single frame delta (seconds). */
 const MAX_FRAME_DT = 0.1;
@@ -47,16 +81,44 @@ export function processActions(actions) {
       case 'MOVE': {
         const entity = getEntity(action.entityId);
         if (!entity?.velocity) break;
-        entity.velocity.x = (action.dx ?? 0) * PLAYER_SPEED;
+
+        // Acceleration-based movement stores intent instead of applying speed instantly.
+        if (entity.physics) {
+          _ensurePhysicsState(entity.physics);
+          entity.physics.moveInput = _clamp(action.dx ?? 0, -1, 1);
+        } else {
+          // Fallback for non-physics entities.
+          entity.velocity.x = _clamp(action.dx ?? 0, -1, 1) * MAX_RUN_SPEED;
+        }
         break;
       }
 
       case 'JUMP': {
         const entity = getEntity(action.entityId);
-        if (!entity?.velocity || !entity?.physics) break;
-        if (entity.physics.onGround) {
+        if (!entity?.velocity) break;
+
+        if (entity.physics) {
+          _ensurePhysicsState(entity.physics);
+          // Buffered jump: consumed when jump is legal (ground/coyote).
+          entity.physics.jumpBufferTimer = JUMP_BUFFER_TIME;
+          entity.physics.jumpHeld = true;
+        } else if (entity.physics?.onGround) {
           entity.velocity.y = -JUMP_SPEED;
           entity.physics.onGround = false;
+        }
+        break;
+      }
+
+      case 'JUMP_RELEASE': {
+        const entity = getEntity(action.entityId);
+        if (!entity?.velocity || !entity.physics) break;
+
+        _ensurePhysicsState(entity.physics);
+        entity.physics.jumpHeld = false;
+
+        // Jump cut: tapping jump yields a lower apex.
+        if (entity.velocity.y < -JUMP_CUT_SPEED_CAP) {
+          entity.velocity.y = -JUMP_CUT_SPEED_CAP;
         }
         break;
       }
@@ -110,21 +172,94 @@ export function update(dt) {
 }
 
 function _integratePhysicsEntity(entity, frameDt) {
+  const physics = entity.physics;
+  _ensurePhysicsState(physics);
+
   const steps = Math.max(1, Math.ceil(frameDt / MAX_PHYSICS_STEP_DT));
   const stepDt = frameDt / steps;
 
   for (let s = 0; s < steps; s++) {
-    // Gravity
-    entity.velocity.y = Math.min(entity.velocity.y + GRAVITY * stepDt, MAX_FALL_SPEED);
+    // Timers and grace windows.
+    physics.jumpBufferTimer = Math.max(0, physics.jumpBufferTimer - stepDt);
+    physics.coyoteTimer = physics.onGround
+      ? COYOTE_TIME
+      : Math.max(0, physics.coyoteTimer - stepDt);
 
-    // X axis
+    // Horizontal intent -> velocity with acceleration smoothing.
+    _applyHorizontalMovement(entity, stepDt);
+
+    // Buffered jump + coyote jump.
+    const canJump = physics.onGround || physics.coyoteTimer > 0;
+    if (physics.jumpBufferTimer > 0 && canJump) {
+      entity.velocity.y = -JUMP_SPEED;
+      physics.onGround = false;
+      physics.coyoteTimer = 0;
+      physics.jumpBufferTimer = 0;
+    }
+
+    // Hold-aware gravity for variable jump height.
+    const gravityMult = _computeGravityMultiplier(entity);
+    entity.velocity.y = Math.min(
+      entity.velocity.y + GRAVITY * gravityMult * stepDt,
+      MAX_FALL_SPEED,
+    );
+
+    // X axis.
     entity.position.x += entity.velocity.x * stepDt;
     _resolveCollisionsX(entity);
 
-    // Y axis
+    // Y axis.
+    const wasOnGround = physics.onGround;
     entity.position.y += entity.velocity.y * stepDt;
     _resolveCollisionsY(entity);
+
+    // Subtle landing damping for smoother state transitions.
+    if (!wasOnGround && physics.onGround && Math.abs(physics.moveInput) < 0.01) {
+      entity.velocity.x *= LANDING_DRAG;
+    }
   }
+}
+
+function _applyHorizontalMovement(entity, dt) {
+  const { velocity, physics } = entity;
+
+  const input = physics.moveInput;
+  const target = input * MAX_RUN_SPEED;
+  const grounded = physics.onGround;
+
+  let accel;
+  if (input !== 0) {
+    accel = grounded ? GROUND_ACCEL : AIR_ACCEL;
+  } else {
+    accel = grounded ? GROUND_DECEL : AIR_DECEL;
+  }
+
+  // Slightly stronger accel when reversing for tighter control.
+  if (input !== 0 && Math.sign(target) !== Math.sign(velocity.x) && velocity.x !== 0) {
+    accel *= TURN_ACCEL_MULT;
+  }
+
+  velocity.x = _approach(velocity.x, target, accel * dt);
+}
+
+function _computeGravityMultiplier(entity) {
+  const { velocity, physics } = entity;
+
+  // Rising + jump released => short hop.
+  if (velocity.y < 0 && !physics.jumpHeld) return LOW_JUMP_GRAVITY_MULT;
+
+  // Slightly stronger fall keeps jump/fall cadence punchy.
+  if (velocity.y > 0) return FALL_GRAVITY_MULT;
+
+  return 1;
+}
+
+function _ensurePhysicsState(physics) {
+  if (typeof physics.onGround !== 'boolean') physics.onGround = false;
+  if (typeof physics.moveInput !== 'number') physics.moveInput = 0;
+  if (typeof physics.jumpBufferTimer !== 'number') physics.jumpBufferTimer = 0;
+  if (typeof physics.coyoteTimer !== 'number') physics.coyoteTimer = 0;
+  if (typeof physics.jumpHeld !== 'boolean') physics.jumpHeld = false;
 }
 
 function _clampDt(dt) {
@@ -226,4 +361,14 @@ function _getEntityEdges(entity) {
     top: cy - hh,
     bottom: cy + hh,
   };
+}
+
+function _approach(current, target, maxDelta) {
+  if (current < target) return Math.min(current + maxDelta, target);
+  if (current > target) return Math.max(current - maxDelta, target);
+  return target;
+}
+
+function _clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
 }

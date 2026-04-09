@@ -209,6 +209,7 @@ function _handleMessage(msg) {
 
     case 'MOVE':
     case 'JUMP':
+    case 'JUMP_RELEASE':
     case 'POSITION': {
       enqueueAction(msg);
       break;
@@ -254,6 +255,8 @@ function _parseAndNormalizeInbound(rawData) {
       return _normalizeMove(obj);
     case 'JUMP':
       return _normalizeJump(obj);
+    case 'JUMP_RELEASE':
+      return _normalizeJumpRelease(obj);
     case 'POSITION':
       return _normalizePosition(obj);
     default:
@@ -348,6 +351,15 @@ function _normalizeJump(m) {
   return { type: 'JUMP', entityId };
 }
 
+function _normalizeJumpRelease(m) {
+  const entityId = _toInt(m.entityId);
+  if (entityId === null) {
+    console.warn('[net] invalid JUMP_RELEASE fields ignored');
+    return null;
+  }
+  return { type: 'JUMP_RELEASE', entityId };
+}
+
 function _normalizePosition(m) {
   const entityId = _toInt(m.entityId);
   const x = _toFinite(m.x);
@@ -402,6 +414,7 @@ function _isValidOutgoingAction(action) {
     case 'MOVE':
       return _toInt(action.entityId) !== null && _toFinite(action.dx) !== null;
     case 'JUMP':
+    case 'JUMP_RELEASE':
       return _toInt(action.entityId) !== null;
     case 'POSITION':
       return (
@@ -452,6 +465,10 @@ function _spawnPlayer(id, x, y, colorHex, isLocal) {
 
     if (!existing.physics) existing.physics = {};
     existing.physics.onGround = false;
+    existing.physics.moveInput = 0;
+    existing.physics.jumpBufferTimer = 0;
+    existing.physics.coyoteTimer = 0;
+    existing.physics.jumpHeld = false;
 
     existing.image = image;
     existing.box = box;
@@ -464,7 +481,13 @@ function _spawnPlayer(id, x, y, colorHex, isLocal) {
     isLocal,
     position: { x, y },
     velocity: { x: 0, y: 0 },
-    physics: { onGround: false },
+    physics: {
+      onGround: false,
+      moveInput: 0,
+      jumpBufferTimer: 0,
+      coyoteTimer: 0,
+      jumpHeld: false,
+    },
     image,
     box,
   });

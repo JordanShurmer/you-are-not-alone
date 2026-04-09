@@ -1,11 +1,15 @@
-// input.js — Platformer keyboard input for Phase 3.
+// input.js — Platformer keyboard input for Phase 3+.
 //
 // Controls:
 //   A / D / ← →      move left / right  → MOVE action (dx only)
-//   W / ↑ / Space     jump               → JUMP action (one-shot on keydown)
+//   W / ↑ / Space     jump press         → JUMP action (one-shot on keydown)
+//   W / ↑ / Space up  jump release       → JUMP_RELEASE action (one-shot on keyup)
 //
-// sampleInput() now returns an Array<Object> of actions to send to the
-// server.  An empty array means nothing changed this frame.
+// sampleInput() returns an Array<Object> of actions to send to the server.
+// An empty array means nothing changed this frame.
+//
+// Jump press + jump release are both emitted so update.js can implement
+// variable jump height (tap for short hop, hold for full jump).
 
 import { enqueueAction } from './actions.js';
 
@@ -16,7 +20,11 @@ import { enqueueAction } from './actions.js';
 const _held = new Set();
 const _lastMoveByEntity = new Map();
 
-let _pendingJump = false;
+/** Whether any jump key is currently held down. */
+let _jumpHeld = false;
+
+/** Ordered jump edge events captured between frames: 'press' | 'release'. */
+const _pendingJumpEvents = [];
 
 // ---------------------------------------------------------------------------
 // Key mappings
@@ -41,7 +49,7 @@ const PREVENT_DEFAULT_KEYS = new Set([
 // ---------------------------------------------------------------------------
 
 /**
- * Attach keyboard and blur listeners to the window.
+ * Attach keyboard and blur listeners to window.
  * Returns a teardown function for cleanup.
  *
  * @returns {{ teardown: () => void }}
@@ -54,29 +62,44 @@ export function setupInput() {
     const dir = KEY_TO_DIRECTION[e.key];
     if (dir) _held.add(dir);
 
-    if (JUMP_KEYS.has(e.key)) _pendingJump = true;
+    if (JUMP_KEYS.has(e.key) && !_jumpHeld) {
+      _jumpHeld = true;
+      _pendingJumpEvents.push('press');
+    }
   }
 
   function onKeyUp(e) {
     if (PREVENT_DEFAULT_KEYS.has(e.key)) e.preventDefault();
+
     const dir = KEY_TO_DIRECTION[e.key];
     if (dir) _held.delete(dir);
+
+    if (JUMP_KEYS.has(e.key) && _jumpHeld) {
+      _jumpHeld = false;
+      _pendingJumpEvents.push('release');
+    }
   }
 
   function onBlur() {
     _held.clear();
-    // _pendingJump is intentionally NOT cleared — it is consumed in sampleInput.
+
+    // If the window loses focus while jump is held, force a release edge
+    // so jump-hold behavior cannot get stuck.
+    if (_jumpHeld) {
+      _jumpHeld = false;
+      _pendingJumpEvents.push('release');
+    }
   }
 
   window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup',   onKeyUp);
-  window.addEventListener('blur',    onBlur);
+  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('blur', onBlur);
 
   return {
     teardown() {
       window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup',   onKeyUp);
-      window.removeEventListener('blur',    onBlur);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
     },
   };
 }
@@ -88,7 +111,7 @@ export function setupInput() {
  * main.js can forward it to the server.
  *
  * @param {number} entityId
- * @returns {Array<Object>}  May be empty.
+ * @returns {Array<Object>} May be empty.
  */
 export function sampleInput(entityId) {
   const result = [];
@@ -104,13 +127,17 @@ export function sampleInput(entityId) {
     result.push(action);
   }
 
-  // ── Jump (one-shot) ───────────────────────────────────────────────────────
-  if (_pendingJump) {
-    _pendingJump = false;
-    const action = { type: 'JUMP', entityId };
+  // ── Jump edge events (press/release) ─────────────────────────────────────
+  for (let i = 0; i < _pendingJumpEvents.length; i++) {
+    const edge = _pendingJumpEvents[i];
+    const action = (edge === 'press')
+      ? { type: 'JUMP', entityId }
+      : { type: 'JUMP_RELEASE', entityId };
+
     enqueueAction(action);
     result.push(action);
   }
+  _pendingJumpEvents.length = 0;
 
   return result;
 }

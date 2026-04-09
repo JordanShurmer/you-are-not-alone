@@ -189,6 +189,11 @@ type JumpMsg struct {
 	EntityID int    `json:"entityId"`
 }
 
+type JumpReleaseMsg struct {
+	Type     string `json:"type"`
+	EntityID int    `json:"entityId"`
+}
+
 type PositionMsg struct {
 	Type     string  `json:"type"`
 	EntityID int     `json:"entityId"`
@@ -210,6 +215,11 @@ type inboundMove struct {
 }
 
 type inboundJump struct {
+	Type     string `json:"type"`
+	EntityID *int   `json:"entityId"`
+}
+
+type inboundJumpRelease struct {
 	Type     string `json:"type"`
 	EntityID *int   `json:"entityId"`
 }
@@ -481,6 +491,23 @@ func handleInboundFromClient(c *Client, raw string) {
 
 		msg := JumpMsg{
 			Type:     "JUMP",
+			EntityID: c.id,
+		}
+		hub.broadcastJSON(msg, c.id)
+
+	case "JUMP_RELEASE":
+		var in inboundJumpRelease
+		if !decodeInbound(raw, &in) || in.EntityID == nil {
+			log.Printf("warn: invalid JUMP_RELEASE from player %d", c.id)
+			return
+		}
+		if *in.EntityID != c.id {
+			log.Printf("warn: spoofed JUMP_RELEASE from player %d (entityId=%d)", c.id, *in.EntityID)
+			return
+		}
+
+		msg := JumpReleaseMsg{
+			Type:     "JUMP_RELEASE",
 			EntityID: c.id,
 		}
 		hub.broadcastJSON(msg, c.id)
