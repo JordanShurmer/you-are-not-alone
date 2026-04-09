@@ -1,11 +1,9 @@
 // update.js — Phase 3: action processing + physics simulation.
 //
-// New in Phase 3:
-//   processActions  — JUMP sets upward velocity when on ground
-//                   — MOVE only sets velocity.x (gravity owns velocity.y)
-//                   — POSITION snap now also syncs remote velocity
-//   update          — applies gravity, then resolves tile collisions via
-//                     separate-axis AABB push-out (X first, then Y)
+// Improvements in this version:
+//   - Tighter timestep handling with bounded frame dt + sub-stepping
+//   - Shared tile-overlap helpers to remove duplicated collision math
+//   - Uses box offsets for collision extents (future-proof for non-centered boxes)
 
 import { entities, getEntity } from './entities.js';
 import { isSolid, getTileSize, isWorldLoaded } from './world.js';
@@ -15,35 +13,41 @@ import { isSolid, getTileSize, isWorldLoaded } from './world.js';
 // ---------------------------------------------------------------------------
 
 /** Horizontal movement speed in px/s. */
-const PLAYER_SPEED   = 220;
+const PLAYER_SPEED = 220;
 
 /** Downward acceleration in px/s². */
-const GRAVITY        = 1600;
+const GRAVITY = 1600;
 
 /** Upward velocity on jump in px/s. */
-const JUMP_SPEED     = 680;
+const JUMP_SPEED = 680;
 
 /** Terminal fall speed in px/s. */
 const MAX_FALL_SPEED = 1400;
+
+/** Hard cap for a single frame delta (seconds). */
+const MAX_FRAME_DT = 0.1;
+
+/** Maximum sub-step size for physics integration (seconds). */
+const MAX_PHYSICS_STEP_DT = 1 / 120;
 
 // ---------------------------------------------------------------------------
 // Step 1 — Action processing
 // ---------------------------------------------------------------------------
 
 /**
- * Process a batch of actions, mutating the relevant entities' state.
+ * Process a batch of actions, mutating entity state.
  *
  * @param {Array<Object>} actions
  */
 export function processActions(actions) {
-  for (const action of actions) {
-    switch (action.type) {
+  for (let i = 0; i < actions.length; i++) {
+    const action = actions[i];
 
+    switch (action.type) {
       case 'MOVE': {
         const entity = getEntity(action.entityId);
         if (!entity?.velocity) break;
-        // dy is ignored — gravity is the sole driver of vertical velocity.
-        entity.velocity.x = action.dx * PLAYER_SPEED;
+        entity.velocity.x = (action.dx ?? 0) * PLAYER_SPEED;
         break;
       }
 
@@ -51,7 +55,7 @@ export function processActions(actions) {
         const entity = getEntity(action.entityId);
         if (!entity?.velocity || !entity?.physics) break;
         if (entity.physics.onGround) {
-          entity.velocity.y      = -JUMP_SPEED;
+          entity.velocity.y = -JUMP_SPEED;
           entity.physics.onGround = false;
         }
         break;
@@ -59,21 +63,20 @@ export function processActions(actions) {
 
       case 'POSITION': {
         const entity = getEntity(action.entityId);
-        if (!entity?.position) break;
-        // Only remote players are snapped; we trust our own simulation.
-        if (!entity.isLocal) {
-          entity.position.x = action.x;
-          entity.position.y = action.y;
-          // Sync velocity so remote physics stays in step.
-          if (entity.velocity && action.vx !== undefined) {
-            entity.velocity.x = action.vx;
-            entity.velocity.y = action.vy ?? 0;
-          }
+        if (!entity?.position || entity.isLocal) break;
+
+        entity.position.x = action.x;
+        entity.position.y = action.y;
+
+        if (entity.velocity) {
+          entity.velocity.x = action.vx ?? 0;
+          entity.velocity.y = action.vy ?? 0;
         }
         break;
       }
 
-      // Unknown action types silently ignored for forward-compatibility.
+      default:
+      // Unknown action types ignored for forward compatibility.
     }
   }
 }
@@ -88,129 +91,139 @@ export function processActions(actions) {
  * @param {number} dt
  */
 export function update(dt) {
-  const safeDt  = Math.min(dt, 0.1);
+  const frameDt = _clampDt(dt);
+  if (frameDt <= 0) return;
+
   const worldOk = isWorldLoaded();
 
-  for (const entity of entities) {
-    if (!entity.position || !entity.velocity) continue;
+  for (let i = 0; i < entities.length; i++) {
+    const entity = entities[i];
+    if (!entity?.position || !entity?.velocity) continue;
 
-    if (entity.physics && worldOk) {
-      // ── Gravity ────────────────────────────────────────────────────────
-      entity.velocity.y = Math.min(
-        entity.velocity.y + GRAVITY * safeDt,
-        MAX_FALL_SPEED,
-      );
-
-      // ── X axis: move then resolve ──────────────────────────────────────
-      entity.position.x += entity.velocity.x * safeDt;
-      if (entity.box) _pushOutX(entity);
-
-      // ── Y axis: move then resolve ──────────────────────────────────────
-      entity.position.y += entity.velocity.y * safeDt;
-      if (entity.box) _pushOutY(entity);
-
+    if (entity.physics && worldOk && entity.box) {
+      _integratePhysicsEntity(entity, frameDt);
     } else {
-      // No physics: free movement (fallback for entities without physics).
-      entity.position.x += entity.velocity.x * safeDt;
-      entity.position.y += entity.velocity.y * safeDt;
+      entity.position.x += entity.velocity.x * frameDt;
+      entity.position.y += entity.velocity.y * frameDt;
     }
   }
 }
 
+function _integratePhysicsEntity(entity, frameDt) {
+  const steps = Math.max(1, Math.ceil(frameDt / MAX_PHYSICS_STEP_DT));
+  const stepDt = frameDt / steps;
+
+  for (let s = 0; s < steps; s++) {
+    // Gravity
+    entity.velocity.y = Math.min(entity.velocity.y + GRAVITY * stepDt, MAX_FALL_SPEED);
+
+    // X axis
+    entity.position.x += entity.velocity.x * stepDt;
+    _resolveCollisionsX(entity);
+
+    // Y axis
+    entity.position.y += entity.velocity.y * stepDt;
+    _resolveCollisionsY(entity);
+  }
+}
+
+function _clampDt(dt) {
+  if (!Number.isFinite(dt) || dt <= 0) return 0;
+  return Math.min(dt, MAX_FRAME_DT);
+}
+
 // ---------------------------------------------------------------------------
-// Collision resolution — separate-axis minimum-penetration push-out
+// Collision helpers
 // ---------------------------------------------------------------------------
+
+function _resolveCollisionsX(entity) {
+  _forEachOverlappingSolidTile(entity, (tile, edges) => {
+    const dL = edges.right - tile.left; // push left
+    const dR = tile.right - edges.left; // push right
+
+    if (dL < dR) {
+      entity.position.x -= dL;
+    } else {
+      entity.position.x += dR;
+    }
+    entity.velocity.x = 0;
+  });
+}
+
+function _resolveCollisionsY(entity) {
+  entity.physics.onGround = false;
+
+  _forEachOverlappingSolidTile(entity, (tile, edges) => {
+    const dT = edges.bottom - tile.top; // landing from above
+    const dB = tile.bottom - edges.top; // head bump from below
+
+    if (dT < dB) {
+      entity.position.y -= dT;
+      entity.velocity.y = 0;
+      entity.physics.onGround = true;
+    } else {
+      entity.position.y += dB;
+      if (entity.velocity.y < 0) entity.velocity.y = 0;
+    }
+  });
+}
 
 /**
- * Push the entity out of any solid tiles along the X axis.
- * Must be called AFTER moving in X, BEFORE moving in Y.
+ * Iterate all solid tiles currently overlapping the entity's box.
  *
  * @param {Object} entity
+ * @param {(tile:{left:number,right:number,top:number,bottom:number},
+ *          edges:{left:number,right:number,top:number,bottom:number}) => void} cb
  */
-function _pushOutX(entity) {
-  const { position: pos, velocity: vel, box } = entity;
-  const hw = box.width  / 2;
-  const hh = box.height / 2;
+function _forEachOverlappingSolidTile(entity, cb) {
   const ts = getTileSize();
+  const bounds = _getTileBounds(entity, ts);
 
-  const txMin = Math.floor((pos.x - hw)        / ts);
-  const txMax = Math.floor((pos.x + hw - 0.01) / ts);
-  const tyMin = Math.floor((pos.y - hh)        / ts);
-  const tyMax = Math.floor((pos.y + hh - 0.01) / ts);
+  for (let ty = bounds.tyMin; ty <= bounds.tyMax; ty++) {
+    const tileTop = ty * ts;
+    const tileBottom = tileTop + ts;
 
-  for (let ty = tyMin; ty <= tyMax; ty++) {
-    for (let tx = txMin; tx <= txMax; tx++) {
+    for (let tx = bounds.txMin; tx <= bounds.txMax; tx++) {
       if (!isSolid(tx, ty)) continue;
 
-      const tLeft   = tx * ts;
-      const tRight  = tLeft + ts;
-      const tTop    = ty * ts;
-      const tBottom = tTop  + ts;
-      const eLeft   = pos.x - hw;
-      const eRight  = pos.x + hw;
+      const tileLeft = tx * ts;
+      const tileRight = tileLeft + ts;
+      const edges = _getEntityEdges(entity);
 
-      // Full 2-D overlap required (avoids corner ghosts after Y resolve).
-      if (eRight  <= tLeft  || eLeft  >= tRight)  continue;
-      if (pos.y + hh <= tTop || pos.y - hh >= tBottom) continue;
+      if (edges.right <= tileLeft || edges.left >= tileRight) continue;
+      if (edges.bottom <= tileTop || edges.top >= tileBottom) continue;
 
-      const dL = eRight - tLeft;   // penetration depth pushing left
-      const dR = tRight - eLeft;   // penetration depth pushing right
-      if (dL < dR) {
-        pos.x -= dL;
-      } else {
-        pos.x += dR;
-      }
-      vel.x = 0;
+      cb(
+        { left: tileLeft, right: tileRight, top: tileTop, bottom: tileBottom },
+        edges,
+      );
     }
   }
 }
 
-/**
- * Push the entity out of any solid tiles along the Y axis.
- * Must be called AFTER moving in Y.
- * Sets entity.physics.onGround = true when the entity lands on a tile top.
- *
- * @param {Object} entity
- */
-function _pushOutY(entity) {
-  const { position: pos, velocity: vel, box, physics } = entity;
-  const hw = box.width  / 2;
+function _getTileBounds(entity, ts) {
+  const e = _getEntityEdges(entity);
+  return {
+    txMin: Math.floor(e.left / ts),
+    txMax: Math.floor((e.right - 0.01) / ts),
+    tyMin: Math.floor(e.top / ts),
+    tyMax: Math.floor((e.bottom - 0.01) / ts),
+  };
+}
+
+function _getEntityEdges(entity) {
+  const { position, box } = entity;
+  const hw = box.width / 2;
   const hh = box.height / 2;
-  const ts = getTileSize();
+  const ox = box.offsetX ?? 0;
+  const oy = box.offsetY ?? 0;
+  const cx = position.x + ox;
+  const cy = position.y + oy;
 
-  physics.onGround = false;
-
-  const txMin = Math.floor((pos.x - hw)        / ts);
-  const txMax = Math.floor((pos.x + hw - 0.01) / ts);
-  const tyMin = Math.floor((pos.y - hh)        / ts);
-  const tyMax = Math.floor((pos.y + hh - 0.01) / ts);
-
-  for (let ty = tyMin; ty <= tyMax; ty++) {
-    for (let tx = txMin; tx <= txMax; tx++) {
-      if (!isSolid(tx, ty)) continue;
-
-      const tLeft   = tx * ts;
-      const tRight  = tLeft + ts;
-      const tTop    = ty * ts;
-      const tBottom = tTop  + ts;
-      const eLeft   = pos.x - hw;
-      const eRight  = pos.x + hw;
-      const eTop    = pos.y - hh;
-      const eBottom = pos.y + hh;
-
-      if (eRight  <= tLeft  || eLeft  >= tRight)  continue;
-      if (eBottom <= tTop   || eTop   >= tBottom) continue;
-
-      const dT = eBottom - tTop;     // depth from above  (landing)
-      const dB = tBottom - eTop;     // depth from below  (head bump)
-      if (dT < dB) {
-        pos.y -= dT;
-        vel.y  = 0;
-        physics.onGround = true;
-      } else {
-        pos.y += dB;
-        if (vel.y < 0) vel.y = 0;
-      }
-    }
-  }
+  return {
+    left: cx - hw,
+    right: cx + hw,
+    top: cy - hh,
+    bottom: cy + hh,
+  };
 }

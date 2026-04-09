@@ -38,6 +38,9 @@ let _width    = 0;
 let _height   = 0;
 let _tileSize = 32;
 
+/** Incremented whenever world data is replaced or cleared. */
+let _revision = 0;
+
 // ---------------------------------------------------------------------------
 // Data loading
 // ---------------------------------------------------------------------------
@@ -53,17 +56,38 @@ export function setWorldData(data) {
   _height   = data.height;
   _tileSize = data.tileSize ?? 32;
   _tiles    = new Int8Array(data.tiles);
+  _revision++;
 }
 
 /** True once setWorldData has been called. */
 export function isWorldLoaded() { return _tiles !== null; }
 
 /**
+ * Clear all world data and bump revision so caches can invalidate.
+ */
+export function clearWorldData() {
+  _tiles = null;
+  _width = 0;
+  _height = 0;
+  _tileSize = 32;
+  _revision++;
+}
+
+/** Monotonic world revision, useful for cache invalidation. */
+export function getWorldRevision() { return _revision; }
+
+/**
  * Raw accessor used by the render system.
- * @returns {{ tiles: Int8Array, width: number, height: number, tileSize: number }}
+ * @returns {{ tiles: Int8Array|null, width: number, height: number, tileSize: number, revision: number }}
  */
 export function getWorldData() {
-  return { tiles: _tiles, width: _width, height: _height, tileSize: _tileSize };
+  return {
+    tiles: _tiles,
+    width: _width,
+    height: _height,
+    tileSize: _tileSize,
+    revision: _revision,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,13 @@
 // - The array is ideal for tight update/render loops.
 // - The map avoids repeated O(n) scans for id-based access.
 
+import {
+  PLAYER_WIDTH,
+  PLAYER_HEIGHT,
+  PLAYER_BOX_OFFSET_X,
+  PLAYER_BOX_OFFSET_Y,
+} from './config.js';
+
 export const entities = [];
 
 /** @type {Map<number, Object>} */
@@ -115,16 +122,16 @@ export function createPlayer(x = 400, y = 300) {
     physics: { onGround: false },
 
     image: {
-      width:  28,
-      height: 44,
-      color:  0x4a9eff,
+      width: PLAYER_WIDTH,
+      height: PLAYER_HEIGHT,
+      color: 0x4a9eff,
     },
 
     box: {
-      width:   28,
-      height:  44,
-      offsetX: 0,
-      offsetY: 0,
+      width: PLAYER_WIDTH,
+      height: PLAYER_HEIGHT,
+      offsetX: PLAYER_BOX_OFFSET_X,
+      offsetY: PLAYER_BOX_OFFSET_Y,
     },
   });
 }
