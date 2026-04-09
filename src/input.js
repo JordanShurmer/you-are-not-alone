@@ -1,9 +1,11 @@
 // input.js — Platformer keyboard input for Phase 3+.
 //
 // Controls:
-//   A / D / ← →      move left / right  → MOVE action (dx only)
-//   W / ↑ / Space     jump press         → JUMP action (one-shot on keydown)
-//   W / ↑ / Space up  jump release       → JUMP_RELEASE action (one-shot on keyup)
+//   A / D / ← →   move left / right         → MOVE action (dx only)
+//   W / ↑          jump press                → JUMP action (one-shot on keydown)
+//   W / ↑ up       jump release              → JUMP_RELEASE action (one-shot on keyup)
+//   Space          boost (heelies push)      → BOOST_START on press, BOOST_END on release
+//                  hold for speed burst, release to glide
 //
 // sampleInput() returns an Array<Object> of actions to send to the server.
 // An empty array means nothing changed this frame.
@@ -26,6 +28,12 @@ let _jumpHeld = false;
 /** Ordered jump edge events captured between frames: 'press' | 'release'. */
 const _pendingJumpEvents = [];
 
+/** Whether the boost key is currently held down. */
+let _boostHeld = false;
+
+/** Ordered boost edge events captured between frames: 'press' | 'release'. */
+const _pendingBoostEvents = [];
+
 // ---------------------------------------------------------------------------
 // Key mappings
 // ---------------------------------------------------------------------------
@@ -37,11 +45,14 @@ const KEY_TO_DIRECTION = {
   d: 'right', D: 'right',
 };
 
-const JUMP_KEYS = new Set(['ArrowUp', 'w', 'W', ' ']);
+const JUMP_KEYS = new Set(['ArrowUp', 'w', 'W']);
+
+const BOOST_KEYS = new Set([' ']);
 
 const PREVENT_DEFAULT_KEYS = new Set([
   ...Object.keys(KEY_TO_DIRECTION),
   ...JUMP_KEYS,
+  ...BOOST_KEYS,
 ]);
 
 // ---------------------------------------------------------------------------
@@ -66,6 +77,11 @@ export function setupInput() {
       _jumpHeld = true;
       _pendingJumpEvents.push('press');
     }
+
+    if (BOOST_KEYS.has(e.key) && !_boostHeld) {
+      _boostHeld = true;
+      _pendingBoostEvents.push('press');
+    }
   }
 
   function onKeyUp(e) {
@@ -78,6 +94,11 @@ export function setupInput() {
       _jumpHeld = false;
       _pendingJumpEvents.push('release');
     }
+
+    if (BOOST_KEYS.has(e.key) && _boostHeld) {
+      _boostHeld = false;
+      _pendingBoostEvents.push('release');
+    }
   }
 
   function onBlur() {
@@ -88,6 +109,12 @@ export function setupInput() {
     if (_jumpHeld) {
       _jumpHeld = false;
       _pendingJumpEvents.push('release');
+    }
+
+    // Same for boost — prevent stuck boost state on focus loss.
+    if (_boostHeld) {
+      _boostHeld = false;
+      _pendingBoostEvents.push('release');
     }
   }
 
@@ -138,6 +165,18 @@ export function sampleInput(entityId) {
     result.push(action);
   }
   _pendingJumpEvents.length = 0;
+
+  // ── Boost edge events (press/release) ────────────────────────────────────
+  for (let i = 0; i < _pendingBoostEvents.length; i++) {
+    const edge = _pendingBoostEvents[i];
+    const action = (edge === 'press')
+      ? { type: 'BOOST_START', entityId }
+      : { type: 'BOOST_END', entityId };
+
+    enqueueAction(action);
+    result.push(action);
+  }
+  _pendingBoostEvents.length = 0;
 
   return result;
 }

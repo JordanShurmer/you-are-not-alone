@@ -14,7 +14,16 @@ import { isSolid, getTileSize, isWorldLoaded } from './world.js';
 // ---------------------------------------------------------------------------
 
 /** Max horizontal run speed (px/s). */
-const MAX_RUN_SPEED = 250;
+const MAX_RUN_SPEED = 160;
+
+/** Max speed while boost is fully charged (px/s). */
+const BOOST_MAX_SPEED = 420;
+
+/** Rate at which boostSpeed ramps up toward BOOST_MAX_SPEED while holding boost on ground (px/s²). */
+const BOOST_ACCEL = 900;
+
+/** Rate at which boostSpeed decays back toward MAX_RUN_SPEED when not boosting (px/s²). */
+const BOOST_DECAY = 70;
 
 /** Ground acceleration toward target speed (px/s²). */
 const GROUND_ACCEL = 1100;
@@ -137,6 +146,22 @@ export function processActions(actions) {
         break;
       }
 
+      case 'BOOST_START': {
+        const entity = getEntity(action.entityId);
+        if (!entity?.physics) break;
+        _ensurePhysicsState(entity.physics);
+        entity.physics.boostHeld = true;
+        break;
+      }
+
+      case 'BOOST_END': {
+        const entity = getEntity(action.entityId);
+        if (!entity?.physics) break;
+        _ensurePhysicsState(entity.physics);
+        entity.physics.boostHeld = false;
+        break;
+      }
+
       default:
       // Unknown action types ignored for forward compatibility.
     }
@@ -223,8 +248,15 @@ function _integratePhysicsEntity(entity, frameDt) {
 function _applyHorizontalMovement(entity, dt) {
   const { velocity, physics } = entity;
 
+  // Update boost speed.
+  if (physics.boostHeld && physics.onGround) {
+    physics.boostSpeed = Math.min(physics.boostSpeed + BOOST_ACCEL * dt, BOOST_MAX_SPEED);
+  } else {
+    physics.boostSpeed = Math.max(physics.boostSpeed - BOOST_DECAY * dt, MAX_RUN_SPEED);
+  }
+
   const input = physics.moveInput;
-  const target = input * MAX_RUN_SPEED;
+  const target = input * physics.boostSpeed;
   const grounded = physics.onGround;
 
   let accel;
@@ -260,6 +292,8 @@ function _ensurePhysicsState(physics) {
   if (typeof physics.jumpBufferTimer !== 'number') physics.jumpBufferTimer = 0;
   if (typeof physics.coyoteTimer !== 'number') physics.coyoteTimer = 0;
   if (typeof physics.jumpHeld !== 'boolean') physics.jumpHeld = false;
+  if (typeof physics.boostHeld !== 'boolean') physics.boostHeld = false;
+  if (typeof physics.boostSpeed !== 'number') physics.boostSpeed = MAX_RUN_SPEED;
 }
 
 function _clampDt(dt) {

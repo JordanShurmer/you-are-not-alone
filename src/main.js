@@ -125,7 +125,7 @@ function buildHud(hudLayer) {
   title.y = 14;
   hudLayer.addChild(title);
 
-  const hint = new PIXI.Text('A / D to move   W / Space to jump', style(12, 0x3a4a6a));
+  const hint = new PIXI.Text('A / D to move   W / ↑ to jump   Space to boost', style(12, 0x3a4a6a));
   hint.anchor.set(0.5, 1);
   hint.x = CANVAS_WIDTH / 2;
   hint.y = CANVAS_HEIGHT - 14;

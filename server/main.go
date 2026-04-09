@@ -194,6 +194,11 @@ type JumpReleaseMsg struct {
 	EntityID int    `json:"entityId"`
 }
 
+type BoostMsg struct {
+	Type     string `json:"type"`
+	EntityID int    `json:"entityId"`
+}
+
 type PositionMsg struct {
 	Type     string  `json:"type"`
 	EntityID int     `json:"entityId"`
@@ -220,6 +225,11 @@ type inboundJump struct {
 }
 
 type inboundJumpRelease struct {
+	Type     string `json:"type"`
+	EntityID *int   `json:"entityId"`
+}
+
+type inboundBoost struct {
 	Type     string `json:"type"`
 	EntityID *int   `json:"entityId"`
 }
@@ -549,6 +559,21 @@ func handleInboundFromClient(c *Client, raw string) {
 			VY:       vy,
 		}
 		hub.broadcastJSON(msg, c.id)
+
+	case "BOOST_START", "BOOST_END":
+		var in inboundBoost
+		if !decodeInbound(raw, &in) || in.EntityID == nil {
+			log.Printf("warn: invalid %s from player %d", env.Type, c.id)
+			return
+		}
+		if *in.EntityID != c.id {
+			log.Printf("warn: spoofed %s from player %d (entityId=%d)", env.Type, c.id, *in.EntityID)
+			return
+		}
+		hub.broadcastJSON(BoostMsg{
+			Type:     env.Type,
+			EntityID: c.id,
+		}, c.id)
 
 	default:
 		// Ignore unknown messages (forward compatibility).
