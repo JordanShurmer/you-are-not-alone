@@ -1,52 +1,40 @@
-// input.js — Keyboard input → action queue bridge (IMGUI-style).
+// input.js — Platformer keyboard input for Phase 3.
 //
-// Rather than tracking state-transition events (KEY_DOWN / KEY_UP) and
-// accumulating flags on entities, this module owns a single Set of currently
-// held directions and exposes one function — sampleInput() — that the game
-// loop calls once per frame.
+// Controls:
+//   A / D / ← →      move left / right  → MOVE action (dx only)
+//   W / ↑ / Space     jump               → JUMP action (one-shot on keydown)
 //
-// sampleInput() reads the Set *right now*, derives a direction vector, and
-// emits a MOVE action only when that vector changes.  This avoids flooding
-// the action queue and network with identical "keep moving" messages every
-// frame while preserving immediate response when direction changes (including
-// the transition back to {dx:0, dy:0}).
-//
-// The focus-loss bug disappears naturally: when the window blurs we clear
-// the Set, and the very next changed sample emits a zero-velocity MOVE.
-// No synthetic KEY_UP events needed.
-//
-// Action emitted:
-//   { type: 'MOVE', entityId: number, dx: -1|0|1, dy: -1|0|1 }
+// sampleInput() now returns an Array<Object> of actions to send to the
+// server.  An empty array means nothing changed this frame.
 
 import { enqueueAction } from './actions.js';
 
 // ---------------------------------------------------------------------------
-// Internal state — the only state this module holds
+// Internal state
 // ---------------------------------------------------------------------------
 
-// Canonical direction strings that are currently physically pressed.
-// Multiple keys can map to the same direction; the Set deduplicates them.
 const _held = new Set();
-
-// Last emitted MOVE vector per entityId. Used to suppress unchanged MOVE spam.
 const _lastMoveByEntity = new Map();
 
+let _pendingJump = false;
+
 // ---------------------------------------------------------------------------
-// Key → direction mapping
+// Key mappings
 // ---------------------------------------------------------------------------
 
 const KEY_TO_DIRECTION = {
-  ArrowUp:    'up',
-  ArrowDown:  'down',
   ArrowLeft:  'left',
   ArrowRight: 'right',
-  w: 'up',  W: 'up',
-  s: 'down', S: 'down',
   a: 'left', A: 'left',
   d: 'right', D: 'right',
 };
 
-const PREVENT_DEFAULT_KEYS = new Set(Object.keys(KEY_TO_DIRECTION));
+const JUMP_KEYS = new Set(['ArrowUp', 'w', 'W', ' ']);
+
+const PREVENT_DEFAULT_KEYS = new Set([
+  ...Object.keys(KEY_TO_DIRECTION),
+  ...JUMP_KEYS,
+]);
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -54,9 +42,7 @@ const PREVENT_DEFAULT_KEYS = new Set(Object.keys(KEY_TO_DIRECTION));
 
 /**
  * Attach keyboard and blur listeners to the window.
- *
- * Call once during initialisation.  Returns a teardown function for
- * hot-reload / testing.
+ * Returns a teardown function for cleanup.
  *
  * @returns {{ teardown: () => void }}
  */
@@ -64,8 +50,11 @@ export function setupInput() {
   function onKeyDown(e) {
     if (PREVENT_DEFAULT_KEYS.has(e.key)) e.preventDefault();
     if (e.repeat) return;
+
     const dir = KEY_TO_DIRECTION[e.key];
     if (dir) _held.add(dir);
+
+    if (JUMP_KEYS.has(e.key)) _pendingJump = true;
   }
 
   function onKeyUp(e) {
@@ -74,10 +63,9 @@ export function setupInput() {
     if (dir) _held.delete(dir);
   }
 
-  // When focus is lost the browser never fires keyup for held keys.
-  // Clearing the set means the next sampleInput() produces dx:0, dy:0.
   function onBlur() {
     _held.clear();
+    // _pendingJump is intentionally NOT cleared — it is consumed in sampleInput.
   }
 
   window.addEventListener('keydown', onKeyDown);
@@ -94,28 +82,35 @@ export function setupInput() {
 }
 
 /**
- * Sample the current held-key state and enqueue a MOVE action for the given
- * entity only if the direction changed since the last emitted MOVE.
+ * Sample current input and return any new actions for this frame.
  *
- * The emitted action carries a unit direction vector (dx / dy each -1, 0,
- * or 1).  The update system multiplies by speed, so input knows nothing
- * about pixels or frame rate.
+ * Each action is both enqueued locally (for update.js) and returned so
+ * main.js can forward it to the server.
  *
  * @param {number} entityId
- * @returns {Object|null} The emitted MOVE action, or null if unchanged.
+ * @returns {Array<Object>}  May be empty.
  */
 export function sampleInput(entityId) {
-  const dx = (_held.has('right') ? 1 : 0) - (_held.has('left') ? 1 : 0);
-  const dy = (_held.has('down')  ? 1 : 0) - (_held.has('up')   ? 1 : 0);
+  const result = [];
 
+  // ── Horizontal movement ──────────────────────────────────────────────────
+  const dx = (_held.has('right') ? 1 : 0) - (_held.has('left') ? 1 : 0);
   const last = _lastMoveByEntity.get(entityId);
-  if (last && last.dx === dx && last.dy === dy) {
-    return null;
+
+  if (!last || last.dx !== dx) {
+    _lastMoveByEntity.set(entityId, { dx });
+    const action = { type: 'MOVE', entityId, dx, dy: 0 };
+    enqueueAction(action);
+    result.push(action);
   }
 
-  _lastMoveByEntity.set(entityId, { dx, dy });
+  // ── Jump (one-shot) ───────────────────────────────────────────────────────
+  if (_pendingJump) {
+    _pendingJump = false;
+    const action = { type: 'JUMP', entityId };
+    enqueueAction(action);
+    result.push(action);
+  }
 
-  const action = { type: 'MOVE', entityId, dx, dy };
-  enqueueAction(action);
-  return action;
+  return result;
 }

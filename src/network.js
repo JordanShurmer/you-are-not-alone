@@ -1,27 +1,15 @@
-// network.js — WebSocket client for Phase 2 multiplayer.
+// network.js — WebSocket client for Phase 3 multiplayer.
 //
-// Connects to the game server and bridges the two-way message flow:
-//
-//   Server → Client messages are handled here:
-//     WELCOME        Assigns our player ID, color, and starting position.
-//                    Also populates entities for all currently-connected players.
-//     SPAWN_PLAYER   A new player joined; create their entity.
-//     DESPAWN_PLAYER A player left; destroy their entity.
-//     MOVE           A remote player's movement action — enqueued directly
-//                    into the action queue so it travels the same path as
-//                    local keyboard input.
-//     POSITION       A remote player's drift-correction snapshot — also
-//                    enqueued so update.js can snap their position.
-//
-//   Client → Server messages are sent via sendAction():
-//     MOVE           Emitted every frame by sampleInput() → main.js
-//     POSITION       Emitted every ~250 ms by main.js for drift correction.
-//
-// Auto-reconnects on disconnect.  The entity store is cleared on every
-// disconnect so it is cleanly rebuilt from the next WELCOME message.
+// Changes from Phase 2:
+//   - WELCOME now carries `world` data; we call setWorldData() before
+//     spawning any players so collision can work from frame one.
+//   - _spawnPlayer gives every player a physics component.
+//   - POSITION actions now carry vx/vy which update.js uses to sync
+//     remote-player velocity.
 
-import { enqueueAction }                          from './actions.js';
+import { enqueueAction }                                          from './actions.js';
 import { createEntity, destroyEntity, clearEntities, getEntity } from './entities.js';
+import { setWorldData }                                           from './world.js';
 
 // ---------------------------------------------------------------------------
 // Module state
@@ -30,7 +18,7 @@ import { createEntity, destroyEntity, clearEntities, getEntity } from './entitie
 /** @type {WebSocket|null} */
 let _ws = null;
 
-/** @type {number|null}  Server-assigned entity ID for the local player. */
+/** @type {number|null} */
 let _localPlayerId = null;
 
 /** @type {boolean} */
@@ -42,25 +30,14 @@ const RECONNECT_DELAY_MS = 2_000;
 // Public API
 // ---------------------------------------------------------------------------
 
-/**
- * @returns {number|null} The server-assigned entity ID for the local player,
- *   or null if not yet welcomed by the server.
- */
-export function getLocalPlayerId() {
-  return _localPlayerId;
-}
+/** @returns {number|null} */
+export function getLocalPlayerId() { return _localPlayerId; }
 
-/**
- * @returns {boolean} True when the WebSocket is open and ready to send.
- */
-export function isConnected() {
-  return _connected;
-}
+/** @returns {boolean} */
+export function isConnected() { return _connected; }
 
 /**
  * Send an action to the server.
- * Safe to call at any time — silently no-ops when not connected.
- *
  * @param {Object} action
  */
 export function sendAction(action) {
@@ -69,13 +46,8 @@ export function sendAction(action) {
   }
 }
 
-/**
- * Open the WebSocket connection.
- * Automatically reconnects on close or error.
- */
-export function setupNetwork() {
-  _connect();
-}
+/** Open the WebSocket connection (auto-reconnects). */
+export function setupNetwork() { _connect(); }
 
 // ---------------------------------------------------------------------------
 // Internal
@@ -94,51 +66,40 @@ function _connect() {
 
   _ws.onmessage = ({ data }) => {
     let msg;
-    try {
-      msg = JSON.parse(data);
-    } catch (e) {
-      console.warn('[net] malformed message:', data);
-      return;
-    }
+    try { msg = JSON.parse(data); }
+    catch (e) { console.warn('[net] malformed message:', data); return; }
     _handleMessage(msg);
   };
 
   _ws.onclose = () => {
     _connected     = false;
     _localPlayerId = null;
-
-    // Wipe the game world.  It will be fully rebuilt from the next WELCOME.
     clearEntities();
-
     console.log(`[net] disconnected — reconnecting in ${RECONNECT_DELAY_MS} ms`);
     setTimeout(_connect, RECONNECT_DELAY_MS);
   };
 
-  _ws.onerror = (err) => {
-    // onclose always fires after onerror; reconnection is handled there.
-    console.error('[net] error:', err);
-  };
+  _ws.onerror = (err) => { console.error('[net] error:', err); };
 }
 
 // ---------------------------------------------------------------------------
 // Message handlers
 // ---------------------------------------------------------------------------
 
-/**
- * Dispatch an inbound server message.
- *
- * @param {Object} msg
- */
 function _handleMessage(msg) {
   switch (msg.type) {
 
     case 'WELCOME': {
       _localPlayerId = msg.playerId;
 
-      // Create the local player entity with our server-assigned ID and color.
+      // Load terrain BEFORE spawning players so collision works from frame 1.
+      if (msg.world) {
+        setWorldData(msg.world);
+        console.log(`[net] world loaded: ${msg.world.width}×${msg.world.height} tiles`);
+      }
+
       _spawnPlayer(msg.playerId, msg.x, msg.y, msg.color, /* isLocal */ true);
 
-      // Create entities for every player already in the game.
       for (const p of (msg.players ?? [])) {
         _spawnPlayer(p.id, p.x, p.y, p.color, /* isLocal */ false);
       }
@@ -162,9 +123,8 @@ function _handleMessage(msg) {
       break;
     }
 
-    // Remote actions enter the action queue — identical treatment to local
-    // keyboard input.  update.js handles both without knowing the origin.
     case 'MOVE':
+    case 'JUMP':
     case 'POSITION': {
       enqueueAction(msg);
       break;
@@ -179,34 +139,25 @@ function _handleMessage(msg) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Convert a CSS hex color string to a packed integer understood by PixiJS.
- *
- * @param {string} hex  e.g. "#4a9eff"
- * @returns {number}    e.g. 0x4a9eff
- */
 function _hexToInt(hex) {
   return parseInt(hex.replace('#', ''), 16);
 }
 
 /**
- * Create a player entity in the local entity store.
- *
- * All players — local and remote — use the same fat-struct shape so every
- * system (render, update, collision) handles them identically.
+ * Create or update a player entity in the local entity store.
  *
  * @param {number}  id
  * @param {number}  x
  * @param {number}  y
- * @param {string}  colorHex  CSS hex string, e.g. "#4a9eff"
- * @param {boolean} isLocal   True only for the player on this machine.
+ * @param {string}  colorHex  e.g. "#4a9eff"
+ * @param {boolean} isLocal
  */
 function _spawnPlayer(id, x, y, colorHex, isLocal) {
   const existing = getEntity(id);
 
   if (existing) {
     existing.isPlayer = true;
-    existing.isLocal = isLocal;
+    existing.isLocal  = isLocal;
 
     if (!existing.position) existing.position = { x: 0, y: 0 };
     existing.position.x = x;
@@ -216,41 +167,24 @@ function _spawnPlayer(id, x, y, colorHex, isLocal) {
     existing.velocity.x = 0;
     existing.velocity.y = 0;
 
-    existing.image = {
-      width:  32,
-      height: 48,
-      color:  _hexToInt(colorHex),
-    };
+    if (!existing.physics) existing.physics = {};
+    existing.physics.onGround = false;
 
-    existing.box = {
-      width:   32,
-      height:  48,
-      offsetX: 0,
-      offsetY: 0,
-    };
+    existing.image = { width: 28, height: 44, color: _hexToInt(colorHex) };
+    existing.box   = { width: 28, height: 44, offsetX: 0, offsetY: 0 };
     return;
   }
 
   createEntity({
     id,
-
     isPlayer: true,
     isLocal,
 
     position: { x, y },
     velocity: { x: 0, y: 0 },
+    physics:  { onGround: false },
 
-    image: {
-      width:  32,
-      height: 48,
-      color:  _hexToInt(colorHex),
-    },
-
-    box: {
-      width:   32,
-      height:  48,
-      offsetX: 0,
-      offsetY: 0,
-    },
+    image: { width: 28, height: 44, color: _hexToInt(colorHex) },
+    box:   { width: 28, height: 44, offsetX: 0, offsetY: 0 },
   });
 }

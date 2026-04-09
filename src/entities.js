@@ -25,18 +25,13 @@ let _nextId = 0;
  * @returns {Object}
  */
 export function createEntity(props = {}) {
-  // Allow callers to pin the entity to a server-assigned id (e.g. for
-  // network players whose id must be consistent across all clients).
   const forcedId = props.id;
   const id = (forcedId !== undefined) ? forcedId : _nextId++;
 
-  // Keep _nextId ahead of any forced id so future auto-assigned ids don't
-  // collide with server-assigned ones.
   if (forcedId !== undefined && forcedId >= _nextId) {
     _nextId = forcedId + 1;
   }
 
-  // Spread props first so our resolved `id` always wins.
   const entity = { ...props, id };
   entities.push(entity);
   _entitiesById.set(id, entity);
@@ -47,7 +42,7 @@ export function createEntity(props = {}) {
  * Destroy an entity by id.
  *
  * @param {number} id
- * @returns {boolean} true if an entity was removed, false otherwise.
+ * @returns {boolean}
  */
 export function destroyEntity(id) {
   const entity = _entitiesById.get(id);
@@ -58,7 +53,6 @@ export function destroyEntity(id) {
   const idx = entities.indexOf(entity);
   if (idx === -1) return true;
 
-  // Swap-remove for O(1) deletion (order not guaranteed).
   const lastIdx = entities.length - 1;
   if (idx !== lastIdx) entities[idx] = entities[lastIdx];
   entities.pop();
@@ -66,10 +60,7 @@ export function destroyEntity(id) {
   return true;
 }
 
-/**
- * Remove all entities and reset id allocation.
- * Useful for tests / hard reset.
- */
+/** Remove all entities and reset id allocation. */
 export function clearEntities() {
   entities.length = 0;
   _entitiesById.clear();
@@ -86,36 +77,27 @@ export function getEntity(id) {
   return _entitiesById.get(id);
 }
 
-/**
- * @returns {number} Current number of live entities.
- */
-export function entityCount() {
-  return entities.length;
-}
+/** @returns {number} Current number of live entities. */
+export function entityCount() { return entities.length; }
 
-/**
- * Check if an id is currently live.
- *
- * @param {number} id
- * @returns {boolean}
- */
-export function hasEntity(id) {
-  return _entitiesById.has(id);
-}
+/** @param {number} id @returns {boolean} */
+export function hasEntity(id) { return _entitiesById.has(id); }
 
 // ---------------------------------------------------------------------------
 // Factory helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Create the local player entity at the given canvas position.
+ * Create the local player entity.
  *
- * Fat struct fields populated:
- *   isPlayer    — flag so other systems can find the player quickly
- *   position    — world-space centre of the entity
- *   velocity    — pixels per second, derived from input each frame
- *   image       — width / height / color used by the render system
- *   box         — axis-aligned bounding box used for collision (Phase 3+)
+ * Fat struct fields:
+ *   isPlayer  — flag used by HUD and camera
+ *   isLocal   — true only on the machine that owns this player
+ *   position  — world-space centre
+ *   velocity  — pixels per second
+ *   physics   — gravity/collision state (Phase 3+)
+ *   image     — width / height / color for the render system
+ *   box       — axis-aligned bounding box for collision (Phase 3+)
  *
  * @param {number} [x=400]
  * @param {number} [y=300]
@@ -124,20 +106,23 @@ export function hasEntity(id) {
 export function createPlayer(x = 400, y = 300) {
   return createEntity({
     isPlayer: true,
-    isLocal: true,
+    isLocal:  true,
 
     position: { x, y },
     velocity: { x: 0, y: 0 },
 
+    // physics — populated by update.js each frame
+    physics: { onGround: false },
+
     image: {
-      width: 32,
-      height: 48,
-      color: 0x4a9eff,
+      width:  28,
+      height: 44,
+      color:  0x4a9eff,
     },
 
     box: {
-      width: 32,
-      height: 48,
+      width:   28,
+      height:  44,
       offsetX: 0,
       offsetY: 0,
     },

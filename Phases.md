@@ -47,6 +47,7 @@ Multiplayer is the soul of this game, so it's established immediately. Every fea
 - Simple camera that follows the local player
 - Generate a basic 2D heightmap world on the server; sync to clients on join
 - World state is shared — both players see the same terrain
+- Camera roughly follows player movement, similar to Noita or Mario games
 
 **Playable result:** A multiplayer side-scrolling platformer. You and a friend run and jump across the same terrain. A tiny Terraria with no features but two players.
 
