@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>You Are Not Alone</title>
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #07070f;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+      font-family: monospace;
+    }
+
+    #game-container {
+      /* PixiJS appends its <canvas> here. */
+      line-height: 0; /* removes the small gap browsers add below inline elements */
+    }
+
+    #game-container canvas {
+      display: block;
+      /* Soft glow so the canvas feels like a window into something alive. */
+      box-shadow:
+        0 0 40px rgba(30, 60, 120, 0.4),
+        0 0 80px rgba(10, 20, 60, 0.3);
+    }
+  </style>
+</head>
+<body>
+
+  <div id="game-container"></div>
+
+  <!--
+    PixiJS v7 loaded as a plain global (window.PIXI).
+    No bundler — the game modules import from each other via ES module
+    syntax, but they all rely on PIXI being available on the global scope
+    before main.js runs.  The defer attribute on the module script below
+    guarantees this script tag fires first.
+  -->
+  <script src="https://cdn.jsdelivr.net/npm/pixi.js@7/dist/pixi.min.js"></script>
+
+  <!--
+    type="module" gives us:
+      • ES module imports between src/ files
+      • Strict mode by default
+      • Deferred execution (runs after the DOM is parsed, after the
+        pixi.js script above has already executed)
+  -->
+  <script type="module" src="src/main.js"></script>
+
+</body>
+</html>
