@@ -25,7 +25,7 @@ Multiplayer is the soul of this game, so it's established immediately. Every fea
 
 **Goal:** A second player can join instantly and you see each other moving around the void.
 
-- Set up a lightweight WebSocket server (Odin)
+- Set up a lightweight WebSocket server (golang with x/net/websocket)
 - Quick-join: no lobbies, no menus. Open the URL, you're in
 - Player actions flow through the action queue — local keyboard input and remote network messages use the exact same path
 - The server receives actions and broadcasts them to all clients

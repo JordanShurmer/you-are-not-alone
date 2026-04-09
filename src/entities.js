@@ -25,9 +25,21 @@ let _nextId = 0;
  * @returns {Object}
  */
 export function createEntity(props = {}) {
-  const entity = { id: _nextId++, ...props };
+  // Allow callers to pin the entity to a server-assigned id (e.g. for
+  // network players whose id must be consistent across all clients).
+  const forcedId = props.id;
+  const id = (forcedId !== undefined) ? forcedId : _nextId++;
+
+  // Keep _nextId ahead of any forced id so future auto-assigned ids don't
+  // collide with server-assigned ones.
+  if (forcedId !== undefined && forcedId >= _nextId) {
+    _nextId = forcedId + 1;
+  }
+
+  // Spread props last so that our resolved `id` always wins.
+  const entity = { ...props, id };
   entities.push(entity);
-  _entitiesById.set(entity.id, entity);
+  _entitiesById.set(id, entity);
   return entity;
 }
 
@@ -112,6 +124,7 @@ export function hasEntity(id) {
 export function createPlayer(x = 400, y = 300) {
   return createEntity({
     isPlayer: true,
+    isLocal: true,
 
     position: { x, y },
     velocity: { x: 0, y: 0 },

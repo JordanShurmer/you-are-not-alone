@@ -4,10 +4,12 @@
 //
 //   STEP 1 — processActions(actions)
 //     Walk the action list and mutate entity state accordingly.
-//     The only action in Phase 1 is MOVE, emitted once per frame by
-//     sampleInput() in input.js.  It carries a pre-resolved direction
-//     vector (dx, dy) so this system only needs to scale by speed —
-//     no key-state bookkeeping, no accumulated flags.
+//     Phase 1 action: MOVE — emitted by sampleInput() in input.js.
+//     Phase 2 action: POSITION — emitted periodically by remote clients via
+//     the server, used to correct accumulated drift in the distributed
+//     simulation.  Both local and remote actions enter this function
+//     identically; the only distinction is that POSITION snaps are skipped
+//     for the local player (we trust our own simulation).
 //
 //   STEP 2 — update(dt)
 //     Walk the entity array and advance the simulation by dt seconds.
@@ -45,6 +47,22 @@ export function processActions(actions) {
         // Scaling here keeps input.js free of simulation constants.
         entity.velocity.x = action.dx * PLAYER_SPEED;
         entity.velocity.y = action.dy * PLAYER_SPEED;
+        break;
+      }
+
+      case 'POSITION': {
+        const entity = getEntity(action.entityId);
+        if (!entity?.position) break;
+
+        // Skip the local player — we trust our own simulation and don't
+        // want to fight against position corrections sent by ourselves.
+        // Remote players get snapped to the authoritative position the
+        // sender reported, correcting any drift that built up from
+        // simulating their movement locally from MOVE actions.
+        if (!entity.isLocal) {
+          entity.position.x = action.x;
+          entity.position.y = action.y;
+        }
         break;
       }
 

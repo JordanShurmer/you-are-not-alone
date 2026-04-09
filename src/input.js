@@ -105,5 +105,9 @@ export function sampleInput(entityId) {
   const dx = (_held.has('right') ? 1 : 0) - (_held.has('left') ? 1 : 0);
   const dy = (_held.has('down')  ? 1 : 0) - (_held.has('up')   ? 1 : 0);
 
-  enqueueAction({ type: 'MOVE', entityId, dx, dy });
+  const action = { type: 'MOVE', entityId, dx, dy };
+  enqueueAction(action);
+  // Return the action so the caller (main.js) can forward it to the server
+  // without needing a separate peek into the queue.
+  return action;
 }
