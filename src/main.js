@@ -49,17 +49,19 @@ const POSITION_SYNC_INTERVAL = 0.25;
 
   app.ticker.add(() => {
     const now = performance.now();
-    const dt  = Math.min((now - lastTimestamp) / 1000, 0.1); // clamp against tab-switch staleness
+    const dt  = (now - lastTimestamp) / 1000;
     lastTimestamp = now;
 
     const localId = getLocalPlayerId();
 
     if (localId !== null) {
       // ── Local input ──────────────────────────────────────────────────────
-      // sampleInput enqueues the MOVE action AND returns it so we can send
-      // it to the server in the same tick without a second queue peek.
+      // sampleInput returns null when direction is unchanged. In that case
+      // we skip the network send to avoid redundant MOVE traffic.
       const moveAction = sampleInput(localId);
-      sendAction(moveAction);
+      if (moveAction) {
+        sendAction(moveAction);
+      }
 
       // ── Periodic position broadcast ──────────────────────────────────────
       // Clients simulate all players locally from MOVE actions.  Over time

@@ -36,7 +36,7 @@ export function createEntity(props = {}) {
     _nextId = forcedId + 1;
   }
 
-  // Spread props last so that our resolved `id` always wins.
+  // Spread props first so our resolved `id` always wins.
   const entity = { ...props, id };
   entities.push(entity);
   _entitiesById.set(id, entity);

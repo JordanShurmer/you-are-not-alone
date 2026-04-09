@@ -6,14 +6,14 @@
 // loop calls once per frame.
 //
 // sampleInput() reads the Set *right now*, derives a direction vector, and
-// enqueues a MOVE action.  If nothing is held it enqueues {dx:0, dy:0} so
-// the entity comes to a stop.  There is never any stale state to clean up:
-// the entity only moves when we have positive evidence of a keypress this
-// frame.
+// emits a MOVE action only when that vector changes.  This avoids flooding
+// the action queue and network with identical "keep moving" messages every
+// frame while preserving immediate response when direction changes (including
+// the transition back to {dx:0, dy:0}).
 //
 // The focus-loss bug disappears naturally: when the window blurs we clear
-// the Set, and the very next sampleInput() call produces a zero-velocity
-// MOVE action.  No synthetic KEY_UP events needed.
+// the Set, and the very next changed sample emits a zero-velocity MOVE.
+// No synthetic KEY_UP events needed.
 //
 // Action emitted:
 //   { type: 'MOVE', entityId: number, dx: -1|0|1, dy: -1|0|1 }
@@ -27,6 +27,9 @@ import { enqueueAction } from './actions.js';
 // Canonical direction strings that are currently physically pressed.
 // Multiple keys can map to the same direction; the Set deduplicates them.
 const _held = new Set();
+
+// Last emitted MOVE vector per entityId. Used to suppress unchanged MOVE spam.
+const _lastMoveByEntity = new Map();
 
 // ---------------------------------------------------------------------------
 // Key → direction mapping
@@ -92,22 +95,27 @@ export function setupInput() {
 
 /**
  * Sample the current held-key state and enqueue a MOVE action for the given
- * entity.  Call this once per frame at the top of the game loop, before
- * draining the action queue.
+ * entity only if the direction changed since the last emitted MOVE.
  *
  * The emitted action carries a unit direction vector (dx / dy each -1, 0,
  * or 1).  The update system multiplies by speed, so input knows nothing
  * about pixels or frame rate.
  *
  * @param {number} entityId
+ * @returns {Object|null} The emitted MOVE action, or null if unchanged.
  */
 export function sampleInput(entityId) {
   const dx = (_held.has('right') ? 1 : 0) - (_held.has('left') ? 1 : 0);
   const dy = (_held.has('down')  ? 1 : 0) - (_held.has('up')   ? 1 : 0);
 
+  const last = _lastMoveByEntity.get(entityId);
+  if (last && last.dx === dx && last.dy === dy) {
+    return null;
+  }
+
+  _lastMoveByEntity.set(entityId, { dx, dy });
+
   const action = { type: 'MOVE', entityId, dx, dy };
   enqueueAction(action);
-  // Return the action so the caller (main.js) can forward it to the server
-  // without needing a separate peek into the queue.
   return action;
 }

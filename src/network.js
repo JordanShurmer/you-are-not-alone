@@ -21,7 +21,7 @@
 // disconnect so it is cleanly rebuilt from the next WELCOME message.
 
 import { enqueueAction }                          from './actions.js';
-import { createEntity, destroyEntity, clearEntities } from './entities.js';
+import { createEntity, destroyEntity, clearEntities, getEntity } from './entities.js';
 
 // ---------------------------------------------------------------------------
 // Module state
@@ -202,6 +202,35 @@ function _hexToInt(hex) {
  * @param {boolean} isLocal   True only for the player on this machine.
  */
 function _spawnPlayer(id, x, y, colorHex, isLocal) {
+  const existing = getEntity(id);
+
+  if (existing) {
+    existing.isPlayer = true;
+    existing.isLocal = isLocal;
+
+    if (!existing.position) existing.position = { x: 0, y: 0 };
+    existing.position.x = x;
+    existing.position.y = y;
+
+    if (!existing.velocity) existing.velocity = { x: 0, y: 0 };
+    existing.velocity.x = 0;
+    existing.velocity.y = 0;
+
+    existing.image = {
+      width:  32,
+      height: 48,
+      color:  _hexToInt(colorHex),
+    };
+
+    existing.box = {
+      width:   32,
+      height:  48,
+      offsetX: 0,
+      offsetY: 0,
+    };
+    return;
+  }
+
   createEntity({
     id,
 

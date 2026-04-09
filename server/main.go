@@ -29,6 +29,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/net/websocket"
 )
@@ -125,6 +126,12 @@ func removeConn(id int) {
 	hub.Unlock()
 }
 
+func connCount() int {
+	hub.RLock()
+	defer hub.RUnlock()
+	return len(hub.conns)
+}
+
 // snapshot returns a slice of every currently-connected player's state.
 // Call this BEFORE addConn for the new joiner so they don't appear in their
 // own "players" list.
@@ -200,7 +207,7 @@ func handleWS(ws *websocket.Conn) {
 	addConn(c)
 
 	log.Printf("+ player %d joined  color=%s  pos=(%.0f,%.0f)  online=%d",
-		id, color, x, y, len(hub.conns))
+		id, color, x, y, connCount())
 
 	// ── WELCOME ──────────────────────────────────────────────────────────────
 	// Sent only to the joining player; tells them their assigned ID, colour,
@@ -279,7 +286,7 @@ func handleWS(ws *websocket.Conn) {
 	close(c.send) // signals the sender goroutine to exit after draining
 	wg.Wait()     // wait for in-flight sends to complete before closing ws
 
-	log.Printf("- player %d left  online=%d", id, len(hub.conns))
+	log.Printf("- player %d left  online=%d", id, connCount())
 
 	// Notify every remaining player so they remove the departed entity.
 	despawn, _ := json.Marshal(Msg{
@@ -294,6 +301,8 @@ func handleWS(ws *websocket.Conn) {
 // ---------------------------------------------------------------------------
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
