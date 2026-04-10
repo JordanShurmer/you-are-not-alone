@@ -16,7 +16,7 @@ const STATUS_SAMPLE_INTERVAL = 0.2;
 
 (function boot() {
   const app = createApp();
-  const { worldLayer, hudLayer } = createLayers(app.stage);
+  const { worldLayer, darknessLayer, hudLayer } = createLayers(app.stage);
 
   setupInput();
   setupNetwork();
@@ -67,7 +67,7 @@ const STATUS_SAMPLE_INTERVAL = 0.2;
     const actions = drainActions();
     processActions(actions);
     update(dt);
-    render(worldLayer, entities);
+    render(worldLayer, darknessLayer, entities);
 
     // HUD status (lighter than recounting every frame)
     if (localId === null) {
@@ -104,12 +104,16 @@ function createApp() {
 
 function createLayers(stage) {
   const worldLayer = new PIXI.Container();
+  // darknessLayer sits between the world and the HUD so it darkens terrain
+  // and entities but never obscures status text or controls hint.
+  const darknessLayer = new PIXI.Container();
   const hudLayer = new PIXI.Container();
 
   stage.addChild(worldLayer);
+  stage.addChild(darknessLayer);
   stage.addChild(hudLayer);
 
-  return { worldLayer, hudLayer };
+  return { worldLayer, darknessLayer, hudLayer };
 }
 
 function buildHud(hudLayer) {
@@ -131,7 +135,7 @@ function buildHud(hudLayer) {
   hint.y = CANVAS_HEIGHT - 14;
   hudLayer.addChild(hint);
 
-  const phase = new PIXI.Text('Phase 3 — Ground Beneath Your Feet', style(10, 0x2a3a5a));
+  const phase = new PIXI.Text('Phase 4 — Darkness and Light', style(10, 0x2a3a5a));
   phase.anchor.set(1, 1);
   phase.x = CANVAS_WIDTH - 16;
   phase.y = CANVAS_HEIGHT - 14;

@@ -19,3 +19,7 @@ export const PLAYER_BOX_OFFSET_Y = 0;
 // Useful derived values
 export const PLAYER_HALF_WIDTH = PLAYER_WIDTH / 2;
 export const PLAYER_HALF_HEIGHT = PLAYER_HEIGHT / 2;
+
+// Phase 4 — lighting
+/** Radius in world-space pixels of each player's carried light source. */
+export const LIGHT_RADIUS = 180;

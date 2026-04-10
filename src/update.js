@@ -17,10 +17,10 @@ import { isSolid, getTileSize, isWorldLoaded } from './world.js';
 const MAX_RUN_SPEED = 160;
 
 /** Peak speed applied instantly on a boost kick (px/s). */
-const BOOST_MAX_SPEED = 420;
+const BOOST_MAX_SPEED = 920;
 
 /** Rate at which boostSpeed decays back toward MAX_RUN_SPEED after a boost kick (px/s²). */
-const BOOST_DECAY = 500;
+const BOOST_DECAY = 600;
 
 /** Ground acceleration toward target speed (px/s²). */
 const GROUND_ACCEL = 1100;

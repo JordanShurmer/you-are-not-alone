@@ -1,0 +1,1 @@
+// lighting.js — stub; Phase 4 lighting is implemented in render.js.

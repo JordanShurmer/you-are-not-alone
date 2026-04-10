@@ -14,6 +14,7 @@ import {
   PLAYER_HEIGHT,
   PLAYER_BOX_OFFSET_X,
   PLAYER_BOX_OFFSET_Y,
+  LIGHT_RADIUS,
 } from './config.js';
 
 // ---------------------------------------------------------------------------
@@ -487,6 +488,7 @@ function _spawnPlayer(id, x, y, colorHex, isLocal) {
 
     existing.image = image;
     existing.box = box;
+    if (!existing.lightsource) existing.lightsource = { radius: LIGHT_RADIUS, offsetX: 0, offsetY: 0 };
     return;
   }
 
@@ -507,6 +509,10 @@ function _spawnPlayer(id, x, y, colorHex, isLocal) {
     },
     image,
     box,
+
+    // Phase 4 — any entity with .lightsource cuts a hole in the darkness.
+    // offsetX/offsetY shift the light origin relative to entity position.
+    lightsource: { radius: LIGHT_RADIUS, offsetX: PLAYER_WIDTH, offsetY: -PLAYER_HEIGHT },
   });
 }
 

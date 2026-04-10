@@ -16,6 +16,7 @@ import {
   PLAYER_HEIGHT,
   PLAYER_BOX_OFFSET_X,
   PLAYER_BOX_OFFSET_Y,
+  LIGHT_RADIUS,
 } from './config.js';
 
 export const entities = [];
@@ -111,6 +112,7 @@ export function hasEntity(id) { return _entitiesById.has(id); }
  * @returns {Object}
  */
 export function createPlayer(x = 400, y = 300) {
+console.log("shurmer")
   return createEntity({
     isPlayer: true,
     isLocal:  true,
@@ -139,5 +141,9 @@ export function createPlayer(x = 400, y = 300) {
       offsetX: PLAYER_BOX_OFFSET_X,
       offsetY: PLAYER_BOX_OFFSET_Y,
     },
+
+    // Phase 4 — any entity with .lightsource cuts a hole in the darkness.
+    // offsetX/offsetY shift the light origin relative to entity position.
+    lightsource: { radius: LIGHT_RADIUS, offsetX: 1000, offsetY: PLAYER_HEIGHT },
   });
 }
