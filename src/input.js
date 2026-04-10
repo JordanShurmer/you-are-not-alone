@@ -4,14 +4,8 @@
 //   A / D / ← →   move left / right         → MOVE action (dx only)
 //   W / ↑          jump press                → JUMP action (one-shot on keydown)
 //   W / ↑ up       jump release              → JUMP_RELEASE action (one-shot on keyup)
-//   Space          boost (heelies push)      → BOOST_START on press, BOOST_END on release
-//                  hold for speed burst, release to glide
-//
-// sampleInput() returns an Array<Object> of actions to send to the server.
-// An empty array means nothing changed this frame.
-//
-// Jump press + jump release are both emitted so update.js can implement
-// variable jump height (tap for short hop, hold for full jump).
+//   Space          boost (heelies push)      → BOOST action (one-shot on keydown only)
+//                  single push that decays quickly like a skateboard kick
 
 import { enqueueAction } from './actions.js';
 
@@ -28,11 +22,8 @@ let _jumpHeld = false;
 /** Ordered jump edge events captured between frames: 'press' | 'release'. */
 const _pendingJumpEvents = [];
 
-/** Whether the boost key is currently held down. */
-let _boostHeld = false;
-
-/** Ordered boost edge events captured between frames: 'press' | 'release'. */
-const _pendingBoostEvents = [];
+/** Whether a boost was pressed since the last sampleInput call. */
+let _pendingBoost = false;
 
 // ---------------------------------------------------------------------------
 // Key mappings
@@ -78,9 +69,9 @@ export function setupInput() {
       _pendingJumpEvents.push('press');
     }
 
-    if (BOOST_KEYS.has(e.key) && !_boostHeld) {
-      _boostHeld = true;
-      _pendingBoostEvents.push('press');
+    if (BOOST_KEYS.has(e.key)) {
+      // One-shot — just flag it; sampleInput will emit the action.
+      _pendingBoost = true;
     }
   }
 
@@ -95,10 +86,7 @@ export function setupInput() {
       _pendingJumpEvents.push('release');
     }
 
-    if (BOOST_KEYS.has(e.key) && _boostHeld) {
-      _boostHeld = false;
-      _pendingBoostEvents.push('release');
-    }
+    // No BOOST_END — boost is a fire-and-forget impulse.
   }
 
   function onBlur() {
@@ -111,11 +99,7 @@ export function setupInput() {
       _pendingJumpEvents.push('release');
     }
 
-    // Same for boost — prevent stuck boost state on focus loss.
-    if (_boostHeld) {
-      _boostHeld = false;
-      _pendingBoostEvents.push('release');
-    }
+    // Boost is stateless (one-shot), so nothing to clean up here.
   }
 
   window.addEventListener('keydown', onKeyDown);
@@ -166,17 +150,13 @@ export function sampleInput(entityId) {
   }
   _pendingJumpEvents.length = 0;
 
-  // ── Boost edge events (press/release) ────────────────────────────────────
-  for (let i = 0; i < _pendingBoostEvents.length; i++) {
-    const edge = _pendingBoostEvents[i];
-    const action = (edge === 'press')
-      ? { type: 'BOOST_START', entityId }
-      : { type: 'BOOST_END', entityId };
-
+  // ── Boost one-shot ───────────────────────────────────────────────────────
+  if (_pendingBoost) {
+    _pendingBoost = false;
+    const action = { type: 'BOOST', entityId };
     enqueueAction(action);
     result.push(action);
   }
-  _pendingBoostEvents.length = 0;
 
   return result;
 }

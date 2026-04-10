@@ -16,14 +16,11 @@ import { isSolid, getTileSize, isWorldLoaded } from './world.js';
 /** Max horizontal run speed (px/s). */
 const MAX_RUN_SPEED = 160;
 
-/** Max speed while boost is fully charged (px/s). */
+/** Peak speed applied instantly on a boost kick (px/s). */
 const BOOST_MAX_SPEED = 420;
 
-/** Rate at which boostSpeed ramps up toward BOOST_MAX_SPEED while holding boost on ground (px/s²). */
-const BOOST_ACCEL = 900;
-
-/** Rate at which boostSpeed decays back toward MAX_RUN_SPEED when not boosting (px/s²). */
-const BOOST_DECAY = 70;
+/** Rate at which boostSpeed decays back toward MAX_RUN_SPEED after a boost kick (px/s²). */
+const BOOST_DECAY = 500;
 
 /** Ground acceleration toward target speed (px/s²). */
 const GROUND_ACCEL = 1100;
@@ -146,19 +143,14 @@ export function processActions(actions) {
         break;
       }
 
-      case 'BOOST_START': {
+      case 'BOOST': {
         const entity = getEntity(action.entityId);
         if (!entity?.physics) break;
         _ensurePhysicsState(entity.physics);
-        entity.physics.boostHeld = true;
-        break;
-      }
-
-      case 'BOOST_END': {
-        const entity = getEntity(action.entityId);
-        if (!entity?.physics) break;
-        _ensurePhysicsState(entity.physics);
-        entity.physics.boostHeld = false;
+        // Skateboard push — only works while grounded.
+        if (entity.physics.onGround) {
+          entity.physics.boostSpeed = BOOST_MAX_SPEED;
+        }
         break;
       }
 
@@ -248,23 +240,14 @@ function _integratePhysicsEntity(entity, frameDt) {
 function _applyHorizontalMovement(entity, dt) {
   const { velocity, physics } = entity;
 
-  // Update boost speed.
-  if (physics.boostHeld && physics.onGround) {
-    physics.boostSpeed = Math.min(physics.boostSpeed + BOOST_ACCEL * dt, BOOST_MAX_SPEED);
-  } else {
-    physics.boostSpeed = Math.max(physics.boostSpeed - BOOST_DECAY * dt, MAX_RUN_SPEED);
-  }
+  // Passive boost decay — speed bleeds off every frame regardless of input.
+  physics.boostSpeed = Math.max(physics.boostSpeed - BOOST_DECAY * dt, MAX_RUN_SPEED);
 
   const input = physics.moveInput;
   const target = input * physics.boostSpeed;
   const grounded = physics.onGround;
 
-  let accel;
-  if (input !== 0) {
-    accel = grounded ? GROUND_ACCEL : AIR_ACCEL;
-  } else {
-    accel = grounded ? GROUND_DECEL : AIR_DECEL;
-  }
+  let accel = grounded ? GROUND_DECEL : AIR_DECEL;
 
   // Slightly stronger accel when reversing for tighter control.
   if (input !== 0 && Math.sign(target) !== Math.sign(velocity.x) && velocity.x !== 0) {
@@ -292,7 +275,6 @@ function _ensurePhysicsState(physics) {
   if (typeof physics.jumpBufferTimer !== 'number') physics.jumpBufferTimer = 0;
   if (typeof physics.coyoteTimer !== 'number') physics.coyoteTimer = 0;
   if (typeof physics.jumpHeld !== 'boolean') physics.jumpHeld = false;
-  if (typeof physics.boostHeld !== 'boolean') physics.boostHeld = false;
   if (typeof physics.boostSpeed !== 'number') physics.boostSpeed = MAX_RUN_SPEED;
 }
 

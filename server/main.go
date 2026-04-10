@@ -35,8 +35,8 @@ const (
 	tileStone = 2
 
 	// World dimensions
-	worldTileW = 200
-	worldTileH = 60
+	worldTileW = 600
+	worldTileH = 450
 	tileSize   = 32
 )
 
@@ -70,17 +70,13 @@ func initWorld() {
 	for x := 0; x < worldTileW; x++ {
 		fx := float64(x) / float64(worldTileW)
 
-		// Layered harmonics for rolling terrain.
+		// Much flatter terrain with minimal variation.
 		h := 0.42 +
-			0.09*math.Sin(fx*2*math.Pi*3.0) +
-			0.06*math.Sin(fx*2*math.Pi*7.0+1.5) +
-			0.03*math.Sin(fx*2*math.Pi*13.0+0.7) +
-			0.02*math.Sin(fx*2*math.Pi*23.0+2.1)
+			0.02*math.Sin(fx*2*math.Pi*1.5) +
+			0.01*math.Sin(fx*2*math.Pi*3.0+1.5)
 
-		surfaceY := int(h * float64(worldTileH))
-		if surfaceY < 0 {
-			surfaceY = 0
-		}
+		surfaceY := max(int(h * float64(worldTileH)), 0)
+
 		if surfaceY >= worldTileH {
 			surfaceY = worldTileH - 1
 		}
@@ -382,8 +378,8 @@ func handleWS(ws *websocket.Conn) {
 	surfaceY := surfaceAt(spawnTileX)
 
 	spawnX := float64(spawnTileX*tileSize) + float64(tileSize)/2
-	// Keep center slightly above terrain top.
-	spawnY := float64(surfaceY*tileSize) - 24.0
+	// Keep center slightly above terrain top (half player height = 14px).
+	spawnY := float64(surfaceY*tileSize) - 15.0
 
 	c := &Client{
 		ws:    ws,
@@ -560,18 +556,18 @@ func handleInboundFromClient(c *Client, raw string) {
 		}
 		hub.broadcastJSON(msg, c.id)
 
-	case "BOOST_START", "BOOST_END":
+	case "BOOST":
 		var in inboundBoost
 		if !decodeInbound(raw, &in) || in.EntityID == nil {
-			log.Printf("warn: invalid %s from player %d", env.Type, c.id)
+			log.Printf("warn: invalid BOOST from player %d", c.id)
 			return
 		}
 		if *in.EntityID != c.id {
-			log.Printf("warn: spoofed %s from player %d (entityId=%d)", env.Type, c.id, *in.EntityID)
+			log.Printf("warn: spoofed BOOST from player %d (entityId=%d)", c.id, *in.EntityID)
 			return
 		}
 		hub.broadcastJSON(BoostMsg{
-			Type:     env.Type,
+			Type:     "BOOST",
 			EntityID: c.id,
 		}, c.id)
 

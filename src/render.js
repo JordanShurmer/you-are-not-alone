@@ -146,7 +146,6 @@ function _renderTilesIfNeeded(worldLayer, camX, camY) {
       _tileGfx.endFill();
 
       _tileGfx.beginFill(hi, 0.55);
-      _tileGfx.drawRect(px, py, ts, 3);
       _tileGfx.endFill();
     }
   }

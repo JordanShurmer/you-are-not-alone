@@ -11,8 +11,8 @@ export const CANVAS_HEIGHT = 600;
 export const BG_COLOR = 0x0d0d1a;
 
 // Player dimensions (visual + collision box for Phase 3)
-export const PLAYER_WIDTH = 28;
-export const PLAYER_HEIGHT = 44;
+export const PLAYER_WIDTH = 18;
+export const PLAYER_HEIGHT = 28;
 export const PLAYER_BOX_OFFSET_X = 0;
 export const PLAYER_BOX_OFFSET_Y = 0;
 

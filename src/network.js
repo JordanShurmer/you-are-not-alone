@@ -211,8 +211,7 @@ function _handleMessage(msg) {
     case 'JUMP':
     case 'JUMP_RELEASE':
     case 'POSITION':
-    case 'BOOST_START':
-    case 'BOOST_END': {
+    case 'BOOST': {
       enqueueAction(msg);
       break;
     }
@@ -259,10 +258,8 @@ function _parseAndNormalizeInbound(rawData) {
       return _normalizeJump(obj);
     case 'JUMP_RELEASE':
       return _normalizeJumpRelease(obj);
-    case 'BOOST_START':
-      return _normalizeBoost(obj, 'BOOST_START');
-    case 'BOOST_END':
-      return _normalizeBoost(obj, 'BOOST_END');
+    case 'BOOST':
+      return _normalizeBoost(obj, 'BOOST');
     case 'POSITION':
       return _normalizePosition(obj);
     default:
@@ -366,13 +363,13 @@ function _normalizeJumpRelease(m) {
   return { type: 'JUMP_RELEASE', entityId };
 }
 
-function _normalizeBoost(m, type) {
+function _normalizeBoost(m) {
   const entityId = _toInt(m.entityId);
   if (entityId === null) {
-    console.warn('[net] invalid ' + type + ' fields ignored');
+    console.warn('[net] invalid BOOST fields ignored');
     return null;
   }
-  return { type, entityId };
+  return { type: 'BOOST', entityId };
 }
 
 function _normalizePosition(m) {
@@ -430,8 +427,7 @@ function _isValidOutgoingAction(action) {
       return _toInt(action.entityId) !== null && _toFinite(action.dx) !== null;
     case 'JUMP':
     case 'JUMP_RELEASE':
-    case 'BOOST_START':
-    case 'BOOST_END':
+    case 'BOOST':
       return _toInt(action.entityId) !== null;
     case 'POSITION':
       return (
@@ -486,7 +482,7 @@ function _spawnPlayer(id, x, y, colorHex, isLocal) {
     existing.physics.jumpBufferTimer = 0;
     existing.physics.coyoteTimer = 0;
     existing.physics.jumpHeld = false;
-    existing.physics.boostHeld = false;
+
     existing.physics.boostSpeed = 160;
 
     existing.image = image;
@@ -506,7 +502,7 @@ function _spawnPlayer(id, x, y, colorHex, isLocal) {
       jumpBufferTimer: 0,
       coyoteTimer: 0,
       jumpHeld: false,
-      boostHeld: false,
+
       boostSpeed: 160,
     },
     image,
