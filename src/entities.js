@@ -1,69 +1,51 @@
-// entities.js — The fat-struct entity store.
-//
-// Every "thing" in the game is a plain object in `entities`.
-// This module provides:
-//
-// - Fast id lookups via an internal Map (O(1) average)
-// - Stable array storage for frame-wide iteration
-// - Clear lifecycle helpers (create / destroy / clear / query)
-//
-// Why both array + map?
-// - The array is ideal for tight update/render loops.
-// - The map avoids repeated O(n) scans for id-based access.
-
-import {
-  PLAYER_WIDTH,
-  PLAYER_HEIGHT,
-  PLAYER_BOX_OFFSET_X,
-  PLAYER_BOX_OFFSET_Y,
-  LIGHT_RADIUS,
-} from './config.js';
+// entities.js — Minimal entity store used by update/render/network.
 
 export const entities = [];
 
 /** @type {Map<number, Object>} */
-const _entitiesById = new Map();
+const entitiesById = new Map();
 
-let _nextId = 0;
+let nextId = 0;
 
 /**
- * Create a new entity and register it in both storage structures.
+ * Create and register an entity.
+ * If `props.id` is provided, that id is used.
  *
- * @param {Object} [props={}] - Initial property bag (fat struct fields).
+ * @param {Object} [props={}]
  * @returns {Object}
  */
 export function createEntity(props = {}) {
   const forcedId = props.id;
-  const id = (forcedId !== undefined) ? forcedId : _nextId++;
+  const id = Number.isInteger(forcedId) ? forcedId : nextId++;
 
-  if (forcedId !== undefined && forcedId >= _nextId) {
-    _nextId = forcedId + 1;
+  if (Number.isInteger(forcedId) && forcedId >= nextId) {
+    nextId = forcedId + 1;
   }
 
   const entity = { ...props, id };
   entities.push(entity);
-  _entitiesById.set(id, entity);
+  entitiesById.set(id, entity);
   return entity;
 }
 
 /**
- * Destroy an entity by id.
+ * Remove an entity by id.
  *
  * @param {number} id
  * @returns {boolean}
  */
 export function destroyEntity(id) {
-  const entity = _entitiesById.get(id);
+  const entity = entitiesById.get(id);
   if (!entity) return false;
 
-  _entitiesById.delete(id);
+  entitiesById.delete(id);
 
-  const idx = entities.indexOf(entity);
-  if (idx === -1) return true;
-
-  const lastIdx = entities.length - 1;
-  if (idx !== lastIdx) entities[idx] = entities[lastIdx];
-  entities.pop();
+  const i = entities.indexOf(entity);
+  if (i !== -1) {
+    const last = entities.length - 1;
+    if (i !== last) entities[i] = entities[last];
+    entities.pop();
+  }
 
   return true;
 }
@@ -71,79 +53,16 @@ export function destroyEntity(id) {
 /** Remove all entities and reset id allocation. */
 export function clearEntities() {
   entities.length = 0;
-  _entitiesById.clear();
-  _nextId = 0;
+  entitiesById.clear();
+  nextId = 0;
 }
 
 /**
- * Find an entity by id in O(1) average time.
+ * Lookup by id.
  *
  * @param {number} id
  * @returns {Object|undefined}
  */
 export function getEntity(id) {
-  return _entitiesById.get(id);
-}
-
-/** @returns {number} Current number of live entities. */
-export function entityCount() { return entities.length; }
-
-/** @param {number} id @returns {boolean} */
-export function hasEntity(id) { return _entitiesById.has(id); }
-
-// ---------------------------------------------------------------------------
-// Factory helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Create the local player entity.
- *
- * Fat struct fields:
- *   isPlayer  — flag used by HUD and camera
- *   isLocal   — true only on the machine that owns this player
- *   position  — world-space centre
- *   velocity  — pixels per second
- *   physics   — gravity/collision state (Phase 3+)
- *   image     — width / height / color for the render system
- *   box       — axis-aligned bounding box for collision (Phase 3+)
- *
- * @param {number} [x=400]
- * @param {number} [y=300]
- * @returns {Object}
- */
-export function createPlayer(x = 400, y = 300) {
-console.log("shurmer")
-  return createEntity({
-    isPlayer: true,
-    isLocal:  true,
-
-    position: { x, y },
-    velocity: { x: 0, y: 0 },
-
-    // physics — populated by update.js each frame
-    physics: {
-      onGround: false,
-      moveInput: 0,
-      jumpBufferTimer: 0,
-      coyoteTimer: 0,
-      jumpHeld: false,
-    },
-
-    image: {
-      width: PLAYER_WIDTH,
-      height: PLAYER_HEIGHT,
-      color: 0x4a9eff,
-    },
-
-    box: {
-      width: PLAYER_WIDTH,
-      height: PLAYER_HEIGHT,
-      offsetX: PLAYER_BOX_OFFSET_X,
-      offsetY: PLAYER_BOX_OFFSET_Y,
-    },
-
-    // Phase 4 — any entity with .lightsource cuts a hole in the darkness.
-    // offsetX/offsetY shift the light origin relative to entity position.
-    lightsource: { radius: LIGHT_RADIUS, offsetX: 1000, offsetY: PLAYER_HEIGHT },
-  });
+  return entitiesById.get(id);
 }

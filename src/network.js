@@ -53,8 +53,7 @@ const RECONNECT_JITTER_RATIO = 0.25;
 /** @returns {number|null} */
 export function getLocalPlayerId() { return _localPlayerId; }
 
-/** @returns {boolean} */
-export function isConnected() { return _connected; }
+
 
 /**
  * Send an action to the server if connected.
@@ -260,7 +259,7 @@ function _parseAndNormalizeInbound(rawData) {
     case 'JUMP_RELEASE':
       return _normalizeJumpRelease(obj);
     case 'BOOST':
-      return _normalizeBoost(obj, 'BOOST');
+      return _normalizeBoost(obj);
     case 'POSITION':
       return _normalizePosition(obj);
     default:

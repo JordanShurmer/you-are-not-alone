@@ -1,9 +1,4 @@
-/**
- * Shared game configuration constants.
- *
- * Centralizing these values avoids duplication across modules and keeps
- * rendering, physics, networking spawn logic, and collision dimensions aligned.
- */
+// Shared game configuration constants.
 
 // Canvas / viewport
 export const CANVAS_WIDTH = 900;
@@ -15,10 +10,6 @@ export const PLAYER_WIDTH = 18;
 export const PLAYER_HEIGHT = 28;
 export const PLAYER_BOX_OFFSET_X = 0;
 export const PLAYER_BOX_OFFSET_Y = 0;
-
-// Useful derived values
-export const PLAYER_HALF_WIDTH = PLAYER_WIDTH / 2;
-export const PLAYER_HALF_HEIGHT = PLAYER_HEIGHT / 2;
 
 // Phase 4 — lighting
 /** Radius in world-space pixels of each player's carried light source. */
