@@ -1,18 +1,20 @@
-// render.js — Phase 4 renderer: camera + terrain + entities + darkness & light.
+// render.js — Phase 5 renderer: camera + terrain + entities + darkness & light + mining overlay.
 //
-// Phase 4 additions:
+// Phase 4 features retained:
 //   - Accepts a `darknessLayer` container (sits above worldLayer in the stage)
-//   - Any entity with `.lightsource { radius }` cuts a soft radial hole in the
-//     darkness — duck-typed, just like `.image` drives sprites or `.box` drives
-//     collision.  Any future entity type (torch, lantern, dragon fire) just
-//     needs the field; the renderer finds it automatically.
-//   - Gradient textures are generated once via Canvas API and cached by radius.
-//   - PIXI.BLEND_MODES.ERASE on a container that has a filter applied gives us
-//     true alpha-subtraction so lights punch real holes in the overlay.
+//   - Any entity with `.lightsource { radius }` cuts a soft radial hole in the darkness
+//   - Gradient textures are generated once via Canvas API and cached by radius
+//   - PIXI.BLEND_MODES.ERASE on a container with a filter gives true alpha-subtraction
+//
+// Phase 5 additions:
+//   - setCameraPosition() called each frame so input.js can convert screen→world coords
+//   - Accepts `miningState` and renders a tile-break progress overlay on worldLayer
 
+import { setCameraPosition } from './camera.js';
 import {
   isWorldLoaded,
   getWorldData,
+  getTileSize,
   TILE_COLORS,
   getWorldPixelWidth,
   getWorldPixelHeight,
@@ -73,6 +75,13 @@ const _gradientCache = new Map();
 const _lightSprites = new Map();
 
 // ---------------------------------------------------------------------------
+// Mining overlay
+// ---------------------------------------------------------------------------
+
+/** @type {PIXI.Graphics|null} */
+let _miningOverlay = null;
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -82,8 +91,9 @@ const _lightSprites = new Map();
  * @param {PIXI.Container} worldLayer    - world-space layer (offset by camera)
  * @param {PIXI.Container} darknessLayer - screen-space darkness overlay
  * @param {Array<Object>}  entities      - full entity array
+ * @param {{ tx:number, ty:number, progress:number, hardness:number }|null} [miningState]
  */
-export function render(worldLayer, darknessLayer, entities) {
+export function render(worldLayer, darknessLayer, entities, miningState) {
   // ── Camera ─────────────────────────────────────────────────────────────
   const local = _findLocalPlayer(entities);
   let camX = 0;
@@ -95,6 +105,9 @@ export function render(worldLayer, darknessLayer, entities) {
     camX = Math.max(0, Math.min(local.position.x - CANVAS_WIDTH  / 2, maxX));
     camY = Math.max(0, Math.min(local.position.y - CAM_Y_OFFSET,      maxY));
   }
+
+  // Share camera position with input.js for screen→world coordinate conversion.
+  setCameraPosition(camX, camY);
 
   worldLayer.x = -Math.round(camX);
   worldLayer.y = -Math.round(camY);
@@ -133,8 +146,55 @@ export function render(worldLayer, darknessLayer, entities) {
     _displayObjects.delete(id);
   }
 
+  // ── Mining overlay ────────────────────────────────────────────────────────
+  _renderMiningOverlay(worldLayer, miningState ?? null);
+
   // ── Darkness + light holes ───────────────────────────────────────────────
   _updateDarkness(darknessLayer, entities, camX, camY);
+}
+
+// ---------------------------------------------------------------------------
+// Mining overlay helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Draw (or clear) the tile-break progress overlay on worldLayer.
+ *
+ * @param {PIXI.Container} worldLayer
+ * @param {{ tx:number, ty:number, progress:number, hardness:number }|null} miningState
+ */
+function _renderMiningOverlay(worldLayer, miningState) {
+  if (!_miningOverlay) {
+    _miningOverlay = new PIXI.Graphics();
+    worldLayer.addChild(_miningOverlay);
+  }
+
+  _miningOverlay.clear();
+
+  if (!miningState) return;
+
+  const { tx, ty, progress, hardness } = miningState;
+  const ts    = getTileSize();
+  const ratio = Math.min(progress / hardness, 1);
+
+  const x = tx * ts;
+  const y = ty * ts;
+
+  // Darkening overlay that deepens as the tile is mined
+  _miningOverlay.beginFill(0x000000, 0.15 + 0.5 * ratio);
+  _miningOverlay.drawRect(x, y, ts, ts);
+  _miningOverlay.endFill();
+
+  // Progress bar track at the bottom of the tile
+  const barH = 4;
+  _miningOverlay.beginFill(0x000000, 0.7);
+  _miningOverlay.drawRect(x, y + ts - barH, ts, barH);
+  _miningOverlay.endFill();
+
+  // Progress bar fill
+  _miningOverlay.beginFill(0xffffff, 0.9);
+  _miningOverlay.drawRect(x, y + ts - barH, Math.round(ts * ratio), barH);
+  _miningOverlay.endFill();
 }
 
 // ---------------------------------------------------------------------------

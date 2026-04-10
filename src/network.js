@@ -1,10 +1,13 @@
-// network.js — Hardened WebSocket client for Phase 3 multiplayer.
+// network.js — Hardened WebSocket client for Phase 5 multiplayer.
 //
-// Improvements:
-// - Reconnect backoff with jitter
-// - Stale-socket guards (ignore events from superseded sockets)
-// - Strong inbound message validation + normalization
-// - Safer outbound send path validation
+// Phase 5 additions:
+//   - TILE_UPDATE inbound handler (authoritative tile changes from server)
+//   - PICKUP_SPAWN inbound handler (server spawning pickup entities)
+//   - PICKUP_COLLECT inbound handler (server confirming pickup removal)
+//   - BREAK_TILE / PLACE_TILE / PICKUP_COLLECT outbound validation
+//   - _normalizeWorld accepts tile type 3 (sand)
+//   - _normalizeWelcome includes pickups field
+//   - WELCOME handler spawns pickups from initial state
 
 import { enqueueAction } from './actions.js';
 import { createEntity, destroyEntity, clearEntities, getEntity } from './entities.js';
@@ -52,8 +55,6 @@ const RECONNECT_JITTER_RATIO = 0.25;
 
 /** @returns {number|null} */
 export function getLocalPlayerId() { return _localPlayerId; }
-
-
 
 /**
  * Send an action to the server if connected.
@@ -188,6 +189,20 @@ function _handleMessage(msg) {
         _spawnPlayer(p.id, p.x, p.y, p.color, false);
       }
 
+      // Spawn any pickups that were already in the world
+      if (Array.isArray(msg.pickups)) {
+        for (let i = 0; i < msg.pickups.length; i++) {
+          const p = msg.pickups[i];
+          enqueueAction({
+            type:     'SPAWN_PICKUP',
+            pickupId: p.id,
+            x:        p.x,
+            y:        p.y,
+            tileType: p.tileType,
+          });
+        }
+      }
+
       console.log(
         `[net] welcomed as player ${msg.playerId}` +
         ` — ${msg.players.length} other(s) present`,
@@ -213,6 +228,35 @@ function _handleMessage(msg) {
     case 'POSITION':
     case 'BOOST': {
       enqueueAction(msg);
+      break;
+    }
+
+    case 'TILE_UPDATE': {
+      enqueueAction({
+        type:     'TILE_UPDATE',
+        tx:       msg.tx,
+        ty:       msg.ty,
+        tileType: msg.tileType,
+      });
+      break;
+    }
+
+    case 'PICKUP_SPAWN': {
+      enqueueAction({
+        type:     'SPAWN_PICKUP',
+        pickupId: msg.id,
+        x:        msg.x,
+        y:        msg.y,
+        tileType: msg.tileType,
+      });
+      break;
+    }
+
+    case 'PICKUP_COLLECT': {
+      enqueueAction({
+        type:     'PICKUP_COLLECT',
+        pickupId: msg.pickupId,
+      });
       break;
     }
 
@@ -262,6 +306,12 @@ function _parseAndNormalizeInbound(rawData) {
       return _normalizeBoost(obj);
     case 'POSITION':
       return _normalizePosition(obj);
+    case 'TILE_UPDATE':
+      return _normalizeTileUpdate(obj);
+    case 'PICKUP_SPAWN':
+      return _normalizePickupSpawn(obj);
+    case 'PICKUP_COLLECT':
+      return _normalizePickupCollect(obj);
     default:
       console.warn('[net] unknown message type ignored:', obj.type);
       return null;
@@ -297,6 +347,21 @@ function _normalizeWelcome(m) {
 
   const world = _normalizeWorld(m.world);
 
+  // Normalize any pre-existing pickups sent in the welcome payload
+  const pickups = [];
+  if (Array.isArray(m.pickups)) {
+    for (let i = 0; i < m.pickups.length; i++) {
+      const p = m.pickups[i];
+      if (!_isPlainObject(p)) continue;
+      const id       = _toInt(p.id);
+      const px       = _toFinite(p.x);
+      const py       = _toFinite(p.y);
+      const tileType = _toInt(p.tileType);
+      if (id === null || px === null || py === null || tileType === null) continue;
+      pickups.push({ id, x: px, y: py, tileType });
+    }
+  }
+
   return {
     type: 'WELCOME',
     playerId,
@@ -305,6 +370,7 @@ function _normalizeWelcome(m) {
     color,
     players,
     world,
+    pickups,
   };
 }
 
@@ -387,6 +453,38 @@ function _normalizePosition(m) {
   return { type: 'POSITION', entityId, x, y, vx, vy };
 }
 
+function _normalizeTileUpdate(m) {
+  const tx       = _toInt(m.tx);
+  const ty       = _toInt(m.ty);
+  const tileType = _toInt(m.tileType);
+  if (tx === null || ty === null || tileType === null) {
+    console.warn('[net] invalid TILE_UPDATE ignored');
+    return null;
+  }
+  return { type: 'TILE_UPDATE', tx, ty, tileType };
+}
+
+function _normalizePickupSpawn(m) {
+  const id       = _toInt(m.id);
+  const x        = _toFinite(m.x);
+  const y        = _toFinite(m.y);
+  const tileType = _toInt(m.tileType);
+  if (id === null || x === null || y === null || tileType === null) {
+    console.warn('[net] invalid PICKUP_SPAWN ignored');
+    return null;
+  }
+  return { type: 'PICKUP_SPAWN', id, x, y, tileType };
+}
+
+function _normalizePickupCollect(m) {
+  const pickupId = _toInt(m.pickupId);
+  if (pickupId === null) {
+    console.warn('[net] invalid PICKUP_COLLECT ignored');
+    return null;
+  }
+  return { type: 'PICKUP_COLLECT', pickupId };
+}
+
 function _normalizeWorld(world) {
   if (!_isPlainObject(world)) return null;
 
@@ -405,11 +503,12 @@ function _normalizeWorld(world) {
     return null;
   }
 
-  // Keep only supported tile values; coerce unknown values to air.
+  // Keep only supported tile values (0=air, 1=dirt, 2=stone, 3=sand);
+  // coerce unknown values to air.
   const tiles = new Array(world.tiles.length);
   for (let i = 0; i < world.tiles.length; i++) {
     const t = _toInt(world.tiles[i]);
-    tiles[i] = (t === 1 || t === 2) ? t : 0;
+    tiles[i] = (t === 1 || t === 2 || t === 3) ? t : 0;
   }
 
   return { width, height, tileSize, tiles };
@@ -434,6 +533,24 @@ function _isValidOutgoingAction(action) {
         _toInt(action.entityId) !== null &&
         _toFinite(action.x) !== null &&
         _toFinite(action.y) !== null
+      );
+    case 'BREAK_TILE':
+      return (
+        _toInt(action.entityId) !== null &&
+        _toInt(action.tx) !== null &&
+        _toInt(action.ty) !== null
+      );
+    case 'PLACE_TILE':
+      return (
+        _toInt(action.entityId) !== null &&
+        _toInt(action.tx) !== null &&
+        _toInt(action.ty) !== null &&
+        _toInt(action.tileType) !== null
+      );
+    case 'PICKUP_COLLECT':
+      return (
+        _toInt(action.entityId) !== null &&
+        _toInt(action.pickupId) !== null
       );
     default:
       // Forward-compatible: allow unknown action types if they at least have type.
@@ -482,7 +599,6 @@ function _spawnPlayer(id, x, y, colorHex, isLocal) {
     existing.physics.jumpBufferTimer = 0;
     existing.physics.coyoteTimer = 0;
     existing.physics.jumpHeld = false;
-
     existing.physics.boostSpeed = 160;
 
     existing.image = image;
@@ -503,14 +619,12 @@ function _spawnPlayer(id, x, y, colorHex, isLocal) {
       jumpBufferTimer: 0,
       coyoteTimer: 0,
       jumpHeld: false,
-
       boostSpeed: 160,
     },
     image,
     box,
 
     // Phase 4 — any entity with .lightsource cuts a hole in the darkness.
-    // offsetX/offsetY shift the light origin relative to entity position.
     lightsource: { radius: LIGHT_RADIUS, offsetX: PLAYER_WIDTH, offsetY: -PLAYER_HEIGHT },
   });
 }

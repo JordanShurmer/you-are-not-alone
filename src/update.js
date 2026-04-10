@@ -1,13 +1,25 @@
 // update.js — movement + physics simulation.
 //
-// Goals of this refactor:
-//   - Acceleration-based horizontal movement (instead of instant velocity set)
-//   - Slower, more deliberate ramp-up for a purposeful feel
-//   - Buffered jumps + coyote time for fluid, forgiving platforming
-//   - Smooth ground/air transitions while preserving collision correctness
+// Phase 5 additions:
+//   - BREAK_TILE / PLACE_TILE / TILE_UPDATE action handlers
+//   - SPAWN_PICKUP / PICKUP_COLLECT action handlers
+//   - Pickup entity physics (gravity + friction + ground landing)
+//   - Local pickup collection with inventory integration
+//   - drainOutboundActions() for forwarding pickup-collect events to server
 
-import { entities, getEntity } from './entities.js';
-import { isSolid, getTileSize, isWorldLoaded } from './world.js';
+import { entities, getEntity, createEntity, destroyEntity } from './entities.js';
+import {
+  isSolid,
+  getTileSize,
+  isWorldLoaded,
+  setTile,
+  getTile,
+  TILE_AIR,
+  TILE_SAND,
+  TILE_COLORS,
+} from './world.js';
+import { addToInventory } from './inventory.js';
+import { getLocalPlayerId } from './network.js';
 
 // ---------------------------------------------------------------------------
 // Tunable movement constants
@@ -69,6 +81,35 @@ const MAX_FRAME_DT = 0.1;
 
 /** Maximum sub-step size for physics integration (seconds). */
 const MAX_PHYSICS_STEP_DT = 1 / 120;
+
+// ---------------------------------------------------------------------------
+// Phase 5 — Pickup constants
+// ---------------------------------------------------------------------------
+
+/** Collect pickups within this distance of the player center (px). */
+const PICKUP_COLLECT_RANGE = 36;
+
+/** Gravity applied to pickup entities (px/s²). */
+const PICKUP_GRAVITY = 900;
+
+/** Max fall speed for pickups (px/s). */
+const PICKUP_MAX_FALL = 800;
+
+// ---------------------------------------------------------------------------
+// Outbound action queue (populated by update, drained by main.js)
+// ---------------------------------------------------------------------------
+
+/** Actions that should be forwarded to the server (populated by update()). */
+const _pendingOutbound = [];
+
+/**
+ * Drain and return all pending outbound actions.
+ * @returns {Array<Object>}
+ */
+export function drainOutboundActions() {
+  if (_pendingOutbound.length === 0) return [];
+  return _pendingOutbound.splice(0, _pendingOutbound.length);
+}
 
 // ---------------------------------------------------------------------------
 // Step 1 — Action processing
@@ -154,6 +195,57 @@ export function processActions(actions) {
         break;
       }
 
+      case 'BREAK_TILE': {
+        // Optimistic client-side tile removal (server will confirm via TILE_UPDATE)
+        const { tx, ty } = action;
+        if (typeof tx === 'number' && typeof ty === 'number') {
+          setTile(tx, ty, TILE_AIR);
+          // Cascade sand above: any sand directly above the broken tile falls down
+          for (let checkY = ty - 1; checkY >= 0; checkY--) {
+            if (getTile(tx, checkY) === TILE_SAND) {
+              setTile(tx, checkY + 1, TILE_SAND);
+              setTile(tx, checkY,     TILE_AIR);
+            } else {
+              break;
+            }
+          }
+        }
+        break;
+      }
+
+      case 'PLACE_TILE': {
+        const { tx, ty, tileType } = action;
+        if (typeof tx === 'number' && typeof ty === 'number' && typeof tileType === 'number') {
+          setTile(tx, ty, tileType);
+        }
+        break;
+      }
+
+      case 'TILE_UPDATE': {
+        // Authoritative tile change from server
+        const { tx, ty, tileType } = action;
+        if (typeof tx === 'number' && typeof ty === 'number' && typeof tileType === 'number') {
+          setTile(tx, ty, tileType);
+        }
+        break;
+      }
+
+      case 'SPAWN_PICKUP': {
+        const { pickupId, x, y, tileType } = action;
+        if (typeof pickupId === 'number') {
+          _spawnPickup(pickupId, x, y, tileType);
+        }
+        break;
+      }
+
+      case 'PICKUP_COLLECT': {
+        const { pickupId } = action;
+        if (typeof pickupId === 'number') {
+          destroyEntity(pickupId);
+        }
+        break;
+      }
+
       default:
       // Unknown action types ignored for forward compatibility.
     }
@@ -175,9 +267,13 @@ export function update(dt) {
 
   const worldOk = isWorldLoaded();
 
+  // ── Player / general entity physics ──────────────────────────────────────
   for (let i = 0; i < entities.length; i++) {
     const entity = entities[i];
     if (!entity?.position || !entity?.velocity) continue;
+
+    // Pickup entities are handled in the dedicated pickup loop below.
+    if (entity.isPickup) continue;
 
     if (entity.physics && worldOk && entity.box) {
       _integratePhysicsEntity(entity, frameDt);
@@ -186,7 +282,87 @@ export function update(dt) {
       entity.position.y += entity.velocity.y * frameDt;
     }
   }
+
+  // ── Pickup physics ────────────────────────────────────────────────────────
+  if (worldOk) {
+    const ts = getTileSize();
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      if (!e?.isPickup || !e?.position || !e?.velocity) continue;
+
+      // Apply gravity
+      e.velocity.y = Math.min(e.velocity.y + PICKUP_GRAVITY * frameDt, PICKUP_MAX_FALL);
+      // Horizontal friction
+      e.velocity.x *= Math.pow(0.85, frameDt * 10);
+
+      e.position.x += e.velocity.x * frameDt;
+      e.position.y += e.velocity.y * frameDt;
+
+      // Simple ground landing — snap to tile top and stop
+      const tx = Math.floor(e.position.x / ts);
+      const ty = Math.floor(e.position.y / ts);
+      if (isSolid(tx, ty)) {
+        e.position.y = ty * ts - 1;
+        e.velocity.y = 0;
+        e.velocity.x = 0;
+      }
+    }
+  }
+
+  // ── Pickup collection ─────────────────────────────────────────────────────
+  const localId = getLocalPlayerId();
+  if (localId !== null) {
+    const localPlayer = getEntity(localId);
+    if (localPlayer?.position) {
+      const px = localPlayer.position.x;
+      const py = localPlayer.position.y;
+
+      // Iterate backwards so swap-pop removal is safe
+      for (let i = entities.length - 1; i >= 0; i--) {
+        const pickup = entities[i];
+        if (!pickup?.isPickup || !pickup?.position) continue;
+
+        const dx = px - pickup.position.x;
+        const dy = py - pickup.position.y;
+        if (Math.sqrt(dx * dx + dy * dy) <= PICKUP_COLLECT_RANGE) {
+          addToInventory(pickup.pickup.tileType);
+          _pendingOutbound.push({
+            type:     'PICKUP_COLLECT',
+            entityId: localId,
+            pickupId: pickup.id,
+          });
+          destroyEntity(pickup.id);
+        }
+      }
+    }
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Pickup helpers
+// ---------------------------------------------------------------------------
+
+function _spawnPickup(id, x, y, tileType) {
+  // Don't duplicate if already exists
+  if (getEntity(id)) return;
+
+  const color = TILE_COLORS[tileType] ?? 0x888888;
+  createEntity({
+    id,
+    isPickup: true,
+    pickup: { tileType },
+    position: { x, y },
+    velocity: {
+      x: (Math.random() - 0.5) * 80,
+      y: -120,
+    },
+    image: { width: 10, height: 10, color },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Physics integration helpers (unchanged from Phase 3/4)
+// ---------------------------------------------------------------------------
 
 function _integratePhysicsEntity(entity, frameDt) {
   const physics = entity.physics;

@@ -70,15 +70,22 @@ Multiplayer is the soul of this game, so it's established immediately. Every fea
 
 ## Phase 5: Breaking and Placing
 
-**Goal:** Players can dig into the world and place blocks, and everyone sees the changes.
+**Goal:** Players can dig into the world and place blocks, and everyone sees the changes. Mining feels weighty and satisfying — not just clicking tiles away, but carving through a world that resists you.
 
 - Click/tap on a tile near the player to break it (enqueue a "break" action)
-- Broken tiles drop a pickup entity; walking over it adds to a simple hotbar inventory
+- Different tile types have different hardness — dirt breaks fast, stone takes longer, deep rock requires a proper pickaxe
+- Breaking a tile leaves a gap immediately — no animation delay, the world just *opens up* like Terraria
+- Broken tiles drop a pickup entity with a small pop and scatter; walking over it adds to a simple hotbar inventory
+- Tiles have material properties (`.material`): dirt crumbles, stone chunks, sand falls (simulate gravity on loose tiles like Noita)
+- Falling sand/gravel cascades naturally — dig under a sand pocket and it pours down
 - Select an inventory slot and click to place that block back into the world
-- Basic UI: hotbar at the bottom of the screen showing what you're carrying
+- Placed blocks snap to the tile grid and feel solid immediately — no "pending" flicker
+- Basic UI: hotbar at the bottom of the screen showing what you're carrying, with tile icons and counts
 - All block changes flow through the action queue → server → all clients (already works by design)
+- Mining range is limited — you must be close to dig, encouraging players to descend together
 
-**Playable result:** Dig tunnels together, build walls together. One player digs while the other lights the way. Cooperation already feels natural.
+**Playable result:** Dig tunnels together, build walls together. Sand pours into your tunnel if you're careless. Stone pushes back until you have the right tool. One player digs while the other lights the way. The world feels like it has *substance*. Cooperation already feels natural.
+
 
 ---
 

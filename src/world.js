@@ -15,11 +15,23 @@
 export const TILE_AIR = 0;
 export const TILE_DIRT = 1;
 export const TILE_STONE = 2;
+export const TILE_SAND = 3;
 
 /** Packed PixiJS fill colour for each solid tile type. */
 export const TILE_COLORS = {
-  [TILE_DIRT]: 0x8b5e3c,   // earthy brown
-  [TILE_STONE]: 0x667788,  // cool blue-grey
+  [TILE_DIRT]:  0x8b5e3c,
+  [TILE_STONE]: 0x667788,
+  [TILE_SAND]:  0xd4aa70,
+};
+
+/**
+ * Time in seconds to break each tile type with bare hands.
+ * @type {Object.<number, number>}
+ */
+export const TILE_HARDNESS = {
+  [TILE_DIRT]:  0.8,
+  [TILE_STONE]: 2.4,
+  [TILE_SAND]:  0.5,
 };
 
 // ---------------------------------------------------------------------------
@@ -77,6 +89,21 @@ export function getWorldData() {
     tileSize: _tileSize,
     revision: _revision,
   };
+}
+
+/**
+ * Mutate a single tile. Bumps the revision so the renderer invalidates its cache.
+ * No-op if coords are out of bounds or world is not loaded.
+ *
+ * @param {number} tx
+ * @param {number} ty
+ * @param {number} tileType
+ */
+export function setTile(tx, ty, tileType) {
+  if (!_tiles) return;
+  if (tx < 0 || tx >= _width || ty < 0 || ty >= _height) return;
+  _tiles[ty * _width + tx] = tileType;
+  _revision++;
 }
 
 // ---------------------------------------------------------------------------
