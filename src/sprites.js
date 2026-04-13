@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 
 /** Characters downloaded from AutoSprite, in order.  Player IDs cycle through these. */
-export const CHARACTERS = ['micah', 'wiz', 'george', 'sam'];
+export const CHARACTERS = ['micah', 'wiz', 'george', 'sam', 'saint', 'titus', 'squire', 'jacque', 'ben', 'bartholemew', 'boniface', 'isaiah'];
 
 // ---------------------------------------------------------------------------
 // Visual constants

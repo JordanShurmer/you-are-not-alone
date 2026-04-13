@@ -37,7 +37,7 @@ const _cache = new Map();
 export const ANIM_KINDS = ['idle', 'walk', 'run', 'attack', 'jump'];
 
 /** Character names that have downloaded sprite assets. */
-export const CHARACTERS = ['micah', 'wiz', 'george', 'sam'];
+export const CHARACTERS = ['micah', 'wiz', 'george', 'sam', 'saint', 'titus', 'squire', 'jacque', 'ben', 'bartholemew', 'boniface', 'isaiah'];
 
 // ---------------------------------------------------------------------------
 // Core loading

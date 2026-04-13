@@ -619,7 +619,7 @@ function _spawnPlayer(id, x, y, colorHex, isLocal) {
     id,
     isPlayer:  true,
     isLocal,
-    character, // Phase 6 — AutoSprite skin name ('micah', 'wiz', 'george', 'sam')
+    character, // Phase 6 — AutoSprite skin name ('micah', 'wiz', 'george', 'sam', 'saint', 'titus', 'squire', 'jacque', 'ben', 'bartholemew', 'boniface', 'isaiah')
     position: { x, y },
     velocity: { x: 0, y: 0 },
     physics: {
