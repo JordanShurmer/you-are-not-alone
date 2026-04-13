@@ -13,7 +13,7 @@ import { enqueueAction } from './actions.js';
 import { getCameraPosition } from './camera.js';
 import { getTileSize, getTile, TILE_AIR, TILE_HARDNESS } from './world.js';
 import { getEntity } from './entities.js';
-import { MINING_RANGE_PX, CANVAS_WIDTH, CANVAS_HEIGHT } from './config.js';
+import { MINING_RANGE_PX, getCanvasWidth, getCanvasHeight } from './config.js';
 import {
   getSelectedItem,
   consumeSelected,
@@ -152,8 +152,8 @@ export function setupInput() {
     const rect = _canvas.getBoundingClientRect();
     // Use logical (CSS) game dimensions so coords match world-space pixels
     // regardless of devicePixelRatio / autoDensity scaling.
-    const scaleX = CANVAS_WIDTH  / rect.width;
-    const scaleY = CANVAS_HEIGHT / rect.height;
+    const scaleX = getCanvasWidth()  / rect.width;
+    const scaleY = getCanvasHeight() / rect.height;
     _mouseX = (e.clientX - rect.left) * scaleX;
     _mouseY = (e.clientY - rect.top)  * scaleY;
   }
@@ -161,8 +161,8 @@ export function setupInput() {
   function onMouseDown(e) {
     if (!_canvas) return;
     const rect = _canvas.getBoundingClientRect();
-    const scaleX = CANVAS_WIDTH  / rect.width;
-    const scaleY = CANVAS_HEIGHT / rect.height;
+    const scaleX = getCanvasWidth()  / rect.width;
+    const scaleY = getCanvasHeight() / rect.height;
     _mouseX = (e.clientX - rect.left) * scaleX;
     _mouseY = (e.clientY - rect.top)  * scaleY;
 

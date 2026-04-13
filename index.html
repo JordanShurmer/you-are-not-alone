@@ -15,24 +15,19 @@
       width: 100%;
       height: 100%;
       background: #07070f;
-      display: flex;
-      justify-content: center;
-      align-items: center;
       overflow: hidden;
       font-family: monospace;
     }
 
     #game-container {
-      /* PixiJS appends its <canvas> here. */
-      line-height: 0; /* removes the small gap browsers add below inline elements */
+      /* PixiJS appends its <canvas> here — fills the full viewport. */
+      width: 100%;
+      height: 100%;
+      line-height: 0;
     }
 
     #game-container canvas {
       display: block;
-      /* Soft glow so the canvas feels like a window into something alive. */
-      box-shadow:
-        0 0 40px rgba(30, 60, 120, 0.4),
-        0 0 80px rgba(10, 20, 60, 0.3);
     }
   </style>
 </head>

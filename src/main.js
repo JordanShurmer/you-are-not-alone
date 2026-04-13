@@ -6,7 +6,7 @@ import { setupInput, sampleInput, getMiningState } from './input.js';
 import { processActions, update, drainOutboundActions } from './update.js';
 import { render } from './render.js';
 import { setupNetwork, getLocalPlayerId, sendAction } from './network.js';
-import { CANVAS_WIDTH, CANVAS_HEIGHT, BG_COLOR } from './config.js';
+import { getCanvasWidth, getCanvasHeight, BG_COLOR } from './config.js';
 import { preloadAllCharacters } from './assetLoader.js';
 import { getSlots, getSelectedSlot, HOTBAR_SLOTS } from './inventory.js';
 import { TILE_COLORS } from './world.js';
@@ -28,7 +28,10 @@ const STATUS_SAMPLE_INTERVAL = 0.2;
   setupInput();
   setupNetwork();
 
-  const { statusText, updateHotbar } = buildHud(hudLayer);
+  const { statusText, updateHotbar, repositionHud } = buildHud(hudLayer);
+
+  // Reposition anchored HUD elements whenever the browser window is resized.
+  window.addEventListener('resize', repositionHud);
 
   let lastTimestamp = performance.now();
   let syncTimer = 0;
@@ -83,7 +86,7 @@ const STATUS_SAMPLE_INTERVAL = 0.2;
 
     render(worldLayer, darknessLayer, entities, getMiningState());
 
-    // Hotbar — update every frame (cheap Graphics redraw)
+    // Hotbar — update every frame (cheap Graphics redraw, also keeps positions in sync)
     updateHotbar();
 
     // HUD status (lighter than recounting every frame)
@@ -106,13 +109,14 @@ const STATUS_SAMPLE_INTERVAL = 0.2;
 })();
 
 function createApp() {
+  // resizeTo: document.body makes PixiJS automatically match the canvas size
+  // to the browser window whenever it changes — no CSS scaling, just more world.
   const app = new PIXI.Application({
-    width:           CANVAS_WIDTH,
-    height:          CANVAS_HEIGHT,
     backgroundColor: BG_COLOR,
     antialias:       true,
     resolution:      window.devicePixelRatio || 1,
     autoDensity:     true,
+    resizeTo:        document.body,
   });
 
   document.getElementById('game-container').appendChild(app.view);
@@ -146,19 +150,16 @@ function buildHud(hudLayer) {
   title.y = 14;
   hudLayer.addChild(title);
 
+  // hint and phase are anchored to the bottom — positions set by repositionHud()
   const hint = new PIXI.Text(
     'A/D · W/↑ jump · Space boost · LClick mine · RClick place · 1-5 slot',
     style(12, 0x3a4a6a),
   );
   hint.anchor.set(0.5, 1);
-  hint.x = CANVAS_WIDTH / 2;
-  hint.y = CANVAS_HEIGHT - 14;
   hudLayer.addChild(hint);
 
   const phase = new PIXI.Text('Phase 6 — Sprites & Animations', style(10, 0x2a3a5a));
   phase.anchor.set(1, 1);
-  phase.x = CANVAS_WIDTH - 16;
-  phase.y = CANVAS_HEIGHT - 14;
   hudLayer.addChild(phase);
 
   const statusText = new PIXI.Text('CONNECTING…', style(11, 0x5a6a3a, 2));
@@ -170,24 +171,18 @@ function buildHud(hudLayer) {
   const SLOT_SIZE    = 40;
   const SLOT_MARGIN  = 4;
   const HOTBAR_TOTAL = HOTBAR_SLOTS * (SLOT_SIZE + SLOT_MARGIN) - SLOT_MARGIN;
-  const hotbarX      = Math.round((CANVAS_WIDTH - HOTBAR_TOTAL) / 2);
-  const hotbarY      = CANVAS_HEIGHT - SLOT_SIZE - 40;
 
   const hotbarGfx   = new PIXI.Graphics();
   const hotbarTexts = [];
   hudLayer.addChild(hotbarGfx);
 
   for (let i = 0; i < HOTBAR_SLOTS; i++) {
-    const tx = hotbarX + i * (SLOT_SIZE + SLOT_MARGIN);
-
-    // Slot number label (top-left corner)
+    // Slot number label (top-left corner) — positioned by repositionHud / updateHotbar
     const numText = new PIXI.Text(`${i + 1}`, {
       fontFamily: 'monospace',
       fontSize:   9,
       fill:       0x778899,
     });
-    numText.x = tx + 3;
-    numText.y = hotbarY + 3;
     hudLayer.addChild(numText);
 
     // Item count label (bottom-right corner)
@@ -197,23 +192,62 @@ function buildHud(hudLayer) {
       fill:       0xffffff,
     });
     countText.anchor.set(1, 1);
-    countText.x = tx + SLOT_SIZE - 3;
-    countText.y = hotbarY + SLOT_SIZE - 3;
     hudLayer.addChild(countText);
 
-    hotbarTexts.push({ countText });
+    hotbarTexts.push({ numText, countText });
   }
+
+  /**
+   * Reposition all viewport-anchored HUD elements to match the current window size.
+   * Called once at startup and again on every 'resize' event.
+   */
+  function repositionHud() {
+    const W = getCanvasWidth();
+    const H = getCanvasHeight();
+
+    hint.x  = W / 2;
+    hint.y  = H - 14;
+    phase.x = W - 16;
+    phase.y = H - 14;
+
+    const hotbarX = Math.round((W - HOTBAR_TOTAL) / 2);
+    const hotbarY = H - SLOT_SIZE - 40;
+
+    for (let i = 0; i < HOTBAR_SLOTS; i++) {
+      const tx = hotbarX + i * (SLOT_SIZE + SLOT_MARGIN);
+      hotbarTexts[i].numText.x   = tx + 3;
+      hotbarTexts[i].numText.y   = hotbarY + 3;
+      hotbarTexts[i].countText.x = tx + SLOT_SIZE - 3;
+      hotbarTexts[i].countText.y = hotbarY + SLOT_SIZE - 3;
+    }
+  }
+
+  // Set initial positions before the first frame.
+  repositionHud();
 
   function updateHotbar() {
     hotbarGfx.clear();
     const slots   = getSlots();
     const selSlot = getSelectedSlot();
 
+    // Recompute hotbar position every frame so it stays centred after any resize.
+    const W       = getCanvasWidth();
+    const H       = getCanvasHeight();
+    const hotbarX = Math.round((W - HOTBAR_TOTAL) / 2);
+    const hotbarY = H - SLOT_SIZE - 40;
+
     for (let i = 0; i < HOTBAR_SLOTS; i++) {
-      const sx         = hotbarX + i * (SLOT_SIZE + SLOT_MARGIN);
+      const tx         = hotbarX + i * (SLOT_SIZE + SLOT_MARGIN);
+      const sx         = tx;
       const sy         = hotbarY;
       const slot       = slots[i];
       const isSelected = i === selSlot;
+
+      // Keep text labels in sync with the (possibly-updated) hotbar position.
+      hotbarTexts[i].numText.x   = tx + 3;
+      hotbarTexts[i].numText.y   = hotbarY + 3;
+      hotbarTexts[i].countText.x = tx + SLOT_SIZE - 3;
+      hotbarTexts[i].countText.y = hotbarY + SLOT_SIZE - 3;
 
       // Slot background
       hotbarGfx.beginFill(0x111118, isSelected ? 0.9 : 0.65);
@@ -239,9 +273,15 @@ function buildHud(hudLayer) {
       // Count text
       hotbarTexts[i].countText.text = slot.count > 0 ? String(slot.count) : '';
     }
+
+    // Keep bottom-anchored labels in sync on every frame too (cheap assignment).
+    hint.x  = W / 2;
+    hint.y  = H - 14;
+    phase.x = W - 16;
+    phase.y = H - 14;
   }
 
-  return { statusText, updateHotbar };
+  return { statusText, updateHotbar, repositionHud };
 }
 
 function countPlayers(allEntities) {

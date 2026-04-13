@@ -1,8 +1,10 @@
 // Shared game configuration constants.
 
-// Canvas / viewport
-export const CANVAS_WIDTH = 900;
-export const CANVAS_HEIGHT = 600;
+// Canvas / viewport — always matches the live browser window so the game
+// fills the full page without rescaling (same world-space pixel density,
+// just more world visible).
+export function getCanvasWidth()  { return window.innerWidth;  }
+export function getCanvasHeight() { return window.innerHeight; }
 export const BG_COLOR = 0x0d0d1a;
 
 // Player dimensions (visual + collision box for Phase 3)

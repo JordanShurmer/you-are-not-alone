@@ -23,7 +23,7 @@ import {
   getWorldPixelWidth,
   getWorldPixelHeight,
 } from './world.js';
-import { CANVAS_WIDTH, CANVAS_HEIGHT } from './config.js';
+import { getCanvasWidth, getCanvasHeight } from './config.js';
 import { getFrames }                   from './assetLoader.js';
 import { SPRITE_SCALE, ANIM_SPEED, LOOPS, getAnimState } from './sprites.js';
 
@@ -32,7 +32,8 @@ import { SPRITE_SCALE, ANIM_SPEED, LOOPS, getAnimState } from './sprites.js';
 // ---------------------------------------------------------------------------
 
 /** Player viewport vertical offset — shows a bit more terrain below player. */
-const CAM_Y_OFFSET = CANVAS_HEIGHT * 0.45;
+/** Recomputed each frame so resizing doesn't shift the vertical viewport anchor. */
+function _camYOffset() { return getCanvasHeight() * 0.45; }
 
 // ---------------------------------------------------------------------------
 // Layer references (initialised lazily on first render call)
@@ -129,10 +130,12 @@ export function render(worldLayer, darknessLayer, entities, miningState) {
   let camY = 0;
 
   if (local && isWorldLoaded()) {
-    const maxX = Math.max(0, getWorldPixelWidth()  - CANVAS_WIDTH);
-    const maxY = Math.max(0, getWorldPixelHeight() - CANVAS_HEIGHT);
-    camX = Math.max(0, Math.min(local.position.x - CANVAS_WIDTH  / 2, maxX));
-    camY = Math.max(0, Math.min(local.position.y - CAM_Y_OFFSET,      maxY));
+    const W    = getCanvasWidth();
+    const H    = getCanvasHeight();
+    const maxX = Math.max(0, getWorldPixelWidth()  - W);
+    const maxY = Math.max(0, getWorldPixelHeight() - H);
+    camX = Math.max(0, Math.min(local.position.x - W / 2,        maxX));
+    camY = Math.max(0, Math.min(local.position.y - _camYOffset(), maxY));
   }
 
   setCameraPosition(camX, camY);
@@ -347,7 +350,7 @@ function _updateDarkness(layer, entities, camX, camY) {
 
     const bg = new PIXI.Graphics();
     bg.beginFill(0x000000, 1.0);
-    bg.drawRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    bg.drawRect(0, 0, 16384, 16384);
     bg.endFill();
     layer.addChild(bg);
 
@@ -439,9 +442,9 @@ function _renderTilesIfNeeded(worldLayer, camX, camY) {
   const { tiles, width, height, tileSize: ts, revision } = world;
 
   const startX = Math.max(0,          Math.floor(camX / ts) - 1);
-  const endX   = Math.min(width  - 1, Math.ceil((camX + CANVAS_WIDTH)  / ts) + 1);
+  const endX   = Math.min(width  - 1, Math.ceil((camX + getCanvasWidth())  / ts) + 1);
   const startY = Math.max(0,          Math.floor(camY / ts) - 1);
-  const endY   = Math.min(height - 1, Math.ceil((camY + CANVAS_HEIGHT) / ts) + 1);
+  const endY   = Math.min(height - 1, Math.ceil((camY + getCanvasHeight()) / ts) + 1);
 
   const sameWindow =
     _tileCache.valid &&
