@@ -8,6 +8,7 @@ import { render } from './render.js';
 import { setupNetwork, getLocalPlayerId, sendAction } from './network.js';
 import { getCanvasWidth, getCanvasHeight, BG_COLOR } from './config.js';
 import { preloadAllCharacters } from './assetLoader.js';
+import { preloadVegetation } from './vegetation.js';
 import { getSlots, getSelectedSlot, HOTBAR_SLOTS } from './inventory.js';
 import { TILE_COLORS } from './world.js';
 import { getCameraPosition } from './camera.js';
@@ -22,7 +23,10 @@ const STATUS_SAMPLE_INTERVAL = 0.2;
 (async function boot() {
   // Phase 6 — preload all AutoSprite character spritesheets before the game loop starts.
   // This is fast since assets are served locally from assets/sprites/.
-  await preloadAllCharacters();
+  await Promise.all([
+    preloadAllCharacters(),
+    preloadVegetation(),
+  ]);
 
   const app = createApp();
   const { parallaxLayer, worldLayer, darknessLayer, hudLayer } = createLayers(app.stage);
@@ -88,7 +92,7 @@ const STATUS_SAMPLE_INTERVAL = 0.2;
       sendAction(outboundActions[i]);
     }
 
-    render(worldLayer, darknessLayer, entities, getMiningState());
+    render(worldLayer, darknessLayer, entities, getMiningState(), dt);
     updateParallax(getCameraPosition().x);
 
     // Hotbar — update every frame (cheap Graphics redraw, also keeps positions in sync)

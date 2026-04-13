@@ -30,7 +30,7 @@ const OVERLAP_PX = 2;
 
 // Base parallax factor: the background as a whole scrolls at this fraction
 // of the camera speed, making it feel like a distant backdrop.
-const BASE_SPEED = 0.85;
+const BASE_SPEED = 0.08;
 
 // Each successive image gets this much extra speed on top of BASE_SPEED.
 // Tiny value — only perceptible at the boundary where two images meet.

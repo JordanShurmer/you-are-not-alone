@@ -15,7 +15,7 @@ export const PLAYER_BOX_OFFSET_Y = 0;
 
 // Phase 4 — lighting
 /** Radius in world-space pixels of each player's carried light source. */
-export const LIGHT_RADIUS = 1800;
+export const LIGHT_RADIUS = 180;
 
 // Phase 5 — Block interaction
 /** World-space pixel radius within which a player can mine/place. */

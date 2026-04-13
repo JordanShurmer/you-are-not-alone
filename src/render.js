@@ -25,6 +25,7 @@ import {
 import { getCanvasWidth, getCanvasHeight } from './config.js';
 import { getFrames }                   from './assetLoader.js';
 import { SPRITE_SCALE, ANIM_SPEED, LOOPS, getAnimState } from './sprites.js';
+import { isVegetationPreloaded, initVegetation, updateVegetation } from './vegetation.js';
 
 // ---------------------------------------------------------------------------
 // Camera
@@ -71,6 +72,9 @@ const _liveIds = new Set();
 // Terrain tile cache
 // ---------------------------------------------------------------------------
 
+/** @type {PIXI.Container|null} */
+let _vegetationContainer = null;
+
 /** @type {PIXI.Graphics|null} */
 let _groundGfx = null;
 
@@ -115,9 +119,11 @@ let _miningOverlay = null;
  * @param {Array<Object>}  entities
  * @param {{ tx:number, ty:number, progress:number, hardness:number }|null} [miningState]
  */
-export function render(worldLayer, darknessLayer, entities, miningState) {
+export function render(worldLayer, darknessLayer, entities, miningState, dt = 0) {
 
   // ── Lazy-init sub-container for entities ────────────────────────────────
+  // NOTE: vegetation is inserted before this container (see below), so we
+  // keep this init here but use addChildAt when placing the veg container.
   if (!_entitiesContainer) {
     _entitiesContainer = new PIXI.Container();
     worldLayer.addChild(_entitiesContainer);
@@ -143,6 +149,19 @@ export function render(worldLayer, darknessLayer, entities, miningState) {
 
   // ── Ground ───────────────────────────────────────────────────────────────
   _renderGround(worldLayer, camX, camY);
+
+  // ── Vegetation (sits above ground, below entities) ────────────────────────
+  // Lazy-init once the world is loaded and assets are ready.
+  // We insert the container at the current index of _entitiesContainer so it
+  // lands between _groundGfx (index 0) and _entitiesContainer (next index).
+  if (!_vegetationContainer && isVegetationPreloaded() && isWorldLoaded()) {
+    _vegetationContainer = initVegetation();
+    const entIdx = worldLayer.getChildIndex(_entitiesContainer);
+    worldLayer.addChildAt(_vegetationContainer, entIdx);
+  }
+  if (_vegetationContainer) {
+    updateVegetation(dt, entities);
+  }
 
   // ── Entity visuals ───────────────────────────────────────────────────────
   _liveIds.clear();
