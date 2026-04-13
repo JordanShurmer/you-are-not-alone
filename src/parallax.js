@@ -13,7 +13,7 @@
 //   // then each frame:
 //   updateParallax(camX);
 
-import { getCanvasWidth, getCanvasHeight } from './config.js';
+import { getCanvasHeight } from './config.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -72,8 +72,6 @@ export async function initParallax(container) {
   for (const tex of textures) {
     tex.baseTexture.scaleMode = PIXI.SCALE_MODES.NEAREST;
   }
-
-  const H = getCanvasHeight();
 
   // Walk left-to-right, placing each scene after the previous one minus the
   // small overlap so they're nearly (but not completely) non-overlapping.

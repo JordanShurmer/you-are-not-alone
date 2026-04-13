@@ -100,12 +100,21 @@ const _gradientCache = new Map();
  */
 const _lightSprites = new Map();
 
+/** Reused set of light-owner entity ids present this frame (avoids per-frame Set allocation). */
+const _activeLightIds = new Set();
+
+/** Reused removal list for stale light sprites (avoids per-frame Array allocation). */
+const _lightsToRemoveTmp = [];
+
 // ---------------------------------------------------------------------------
 // Mining overlay
 // ---------------------------------------------------------------------------
 
 /** @type {PIXI.Graphics|null} */
 let _miningOverlay = null;
+
+/** Quick visual hack: push all character sprites down to reduce "floating". */
+const CHARACTER_GROUND_OFFSET_Y = 14;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -241,7 +250,7 @@ function _updateCharacterSprite(entity) {
 
   // ── Position ─────────────────────────────────────────────────────────────
   obj.container.x = bx;
-  obj.container.y = by;
+  obj.container.y = by + CHARACTER_GROUND_OFFSET_Y;
 
   // ── Facing direction (sticky — only changes when velocity is meaningful) ─
   const vx = velocity?.x ?? 0;
@@ -279,7 +288,7 @@ function _createCharacterSprite(characterName) {
   // Ground-contact shadow (rendered below the sprite)
   const shadow = new PIXI.Graphics();
   shadow.beginFill(0x000000, 0.28);
-  shadow.drawEllipse(0, 2, 13, 4);
+  shadow.drawEllipse(0, 2 - CHARACTER_GROUND_OFFSET_Y, 13, 4);
   shadow.endFill();
   container.addChild(shadow);
 
@@ -373,7 +382,7 @@ function _updateDarkness(layer, entities, camX, camY) {
     _darknessReady = true;
   }
 
-  const activeIds = new Set();
+  _activeLightIds.clear();
 
   for (let i = 0; i < entities.length; i++) {
     const e = entities[i];
@@ -381,7 +390,7 @@ function _updateDarkness(layer, entities, camX, camY) {
 
     const { id, position, lightsource } = e;
     const radius = lightsource.radius;
-    activeIds.add(id);
+    _activeLightIds.add(id);
 
     const sx = Math.round(position.x + (lightsource.offsetX ?? 0) - camX);
     const sy = Math.round(position.y + (lightsource.offsetY ?? 0) - camY);
@@ -404,12 +413,12 @@ function _updateDarkness(layer, entities, camX, camY) {
     sprite.y = sy;
   }
 
-  const toRemove = [];
+  _lightsToRemoveTmp.length = 0;
   for (const [id] of _lightSprites) {
-    if (!activeIds.has(id)) toRemove.push(id);
+    if (!_activeLightIds.has(id)) _lightsToRemoveTmp.push(id);
   }
-  for (let i = 0; i < toRemove.length; i++) {
-    const id     = toRemove[i];
+  for (let i = 0; i < _lightsToRemoveTmp.length; i++) {
+    const id     = _lightsToRemoveTmp[i];
     const sprite = _lightSprites.get(id);
     layer.removeChild(sprite);
     sprite.destroy({ texture: false });

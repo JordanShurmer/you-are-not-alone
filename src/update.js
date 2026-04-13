@@ -316,6 +316,7 @@ export function update(dt) {
     if (localPlayer?.position) {
       const px = localPlayer.position.x;
       const py = localPlayer.position.y;
+      const rangeSq = PICKUP_COLLECT_RANGE * PICKUP_COLLECT_RANGE;
 
       // Iterate backwards so swap-pop removal is safe
       for (let i = entities.length - 1; i >= 0; i--) {
@@ -324,7 +325,7 @@ export function update(dt) {
 
         const dx = px - pickup.position.x;
         const dy = py - pickup.position.y;
-        if (Math.sqrt(dx * dx + dy * dy) <= PICKUP_COLLECT_RANGE) {
+        if (dx * dx + dy * dy <= rangeSq) {
           addToInventory(pickup.pickup.tileType);
           _pendingOutbound.push({
             type:     'PICKUP_COLLECT',
@@ -422,11 +423,15 @@ function _applyHorizontalMovement(entity, dt) {
   const input = physics.moveInput;
   const target = input * physics.boostSpeed;
   const grounded = physics.onGround;
+  const hasInput = Math.abs(input) > 0.001;
 
-  let accel = grounded ? GROUND_DECEL : AIR_DECEL;
+  // Use acceleration when steering, deceleration when releasing input.
+  let accel = grounded
+    ? (hasInput ? GROUND_ACCEL : GROUND_DECEL)
+    : (hasInput ? AIR_ACCEL : AIR_DECEL);
 
   // Slightly stronger accel when reversing for tighter control.
-  if (input !== 0 && Math.sign(target) !== Math.sign(velocity.x) && velocity.x !== 0) {
+  if (hasInput && Math.sign(target) !== Math.sign(velocity.x) && velocity.x !== 0) {
     accel *= TURN_ACCEL_MULT;
   }
 

@@ -125,6 +125,9 @@ export async function preloadVegetation() {
 /** @type {VegInstance[]} */
 let _instances = [];
 
+/** Reused per-frame buffer of player positions to avoid allocations in updateVegetation(). */
+const _playerPositionsTmp = [];
+
 // ---------------------------------------------------------------------------
 // Seeded RNG (Mulberry32) — deterministic placement per world size
 // ---------------------------------------------------------------------------
@@ -210,7 +213,7 @@ export function initVegetation() {
     sprite.anchor.set(0.5, 1);          // bottom-centre origin
     sprite.scale.set(flipX * scale, scale);
     sprite.x = worldX;
-    sprite.y = worldY;
+    sprite.y = worldY + 14;           // quick hack: push vegetation down toward ground
 
     container.addChild(sprite);
 
@@ -248,11 +251,11 @@ export function initVegetation() {
 export function updateVegetation(dt, entities) {
   if (_instances.length === 0) return;
 
-  // Collect all player world positions once per frame.
-  const playerPositions = [];
+  // Collect all player world positions once per frame (reusing the same array).
+  _playerPositionsTmp.length = 0;
   for (let i = 0; i < entities.length; i++) {
     const e = entities[i];
-    if (e?.isPlayer && e?.position) playerPositions.push(e.position);
+    if (e?.isPlayer && e?.position) _playerPositionsTmp.push(e.position);
   }
 
   for (let i = 0; i < _instances.length; i++) {
@@ -272,8 +275,8 @@ export function updateVegetation(dt, entities) {
 
     // ── Proximity trigger ──────────────────────────────────────────────────
     let triggered = false;
-    for (let p = 0; p < playerPositions.length; p++) {
-      const pos = playerPositions[p];
+    for (let p = 0; p < _playerPositionsTmp.length; p++) {
+      const pos = _playerPositionsTmp[p];
       const dx  = pos.x - inst.worldX;
       const dy  = pos.y - inst.worldY;
       if (dx * dx + dy * dy <= inst.triggerRadius * inst.triggerRadius) {

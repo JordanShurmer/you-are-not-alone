@@ -102,7 +102,9 @@ export function getWorldData() {
 export function setTile(tx, ty, tileType) {
   if (!_tiles) return;
   if (tx < 0 || tx >= _width || ty < 0 || ty >= _height) return;
-  _tiles[ty * _width + tx] = tileType;
+  const idx = ty * _width + tx;
+  if (_tiles[idx] === tileType) return;
+  _tiles[idx] = tileType;
   _revision++;
 }
 

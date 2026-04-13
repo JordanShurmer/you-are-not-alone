@@ -44,6 +44,11 @@ const (
 
 	// Mining
 	miningRangePx = 192.0
+	miningRangeSq = miningRangePx * miningRangePx
+
+	// Pickup collection validation (server-authoritative)
+	pickupCollectRangePx = 56.0
+	pickupCollectRangeSq = pickupCollectRangePx * pickupCollectRangePx
 )
 
 var playerColors = [...]string{
@@ -407,10 +412,20 @@ func (h *Hub) addPickup(p *PickupEntity) {
 	h.mu.Unlock()
 }
 
-func (h *Hub) removePickup(id int) {
+func (h *Hub) tryCollectPickup(id int, px, py, maxRangeSq float64) bool {
 	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	p, ok := h.pickups[id]
+	if !ok {
+		return false
+	}
+	if distSq(px, py, p.X, p.Y) > maxRangeSq {
+		return false
+	}
+
 	delete(h.pickups, id)
-	h.mu.Unlock()
+	return true
 }
 
 func (h *Hub) snapshotPickups() []PickupEntity {
@@ -475,6 +490,12 @@ func decodeInbound(raw string, v any) bool {
 		return false
 	}
 	return true
+}
+
+func distSq(ax, ay, bx, by float64) float64 {
+	dx := ax - bx
+	dy := ay - by
+	return dx*dx + dy*dy
 }
 
 // -----------------------------------------------------------------------------
@@ -703,9 +724,7 @@ func handleInboundFromClient(c *Client, raw string) {
 		// Range check against the player's last known position.
 		tileX := (float64(tx) + 0.5) * float64(tileSize)
 		tileY := (float64(ty) + 0.5) * float64(tileSize)
-		dx := c.x - tileX
-		dy := c.y - tileY
-		if math.Sqrt(dx*dx+dy*dy) > miningRangePx {
+		if distSq(c.x, c.y, tileX, tileY) > miningRangeSq {
 			return
 		}
 
@@ -788,9 +807,7 @@ func handleInboundFromClient(c *Client, raw string) {
 		// Range check.
 		tileX := (float64(tx) + 0.5) * float64(tileSize)
 		tileY := (float64(ty) + 0.5) * float64(tileSize)
-		dx := c.x - tileX
-		dy := c.y - tileY
-		if math.Sqrt(dx*dx+dy*dy) > miningRangePx {
+		if distSq(c.x, c.y, tileX, tileY) > miningRangeSq {
 			return
 		}
 
@@ -821,11 +838,16 @@ func handleInboundFromClient(c *Client, raw string) {
 			log.Printf("warn: spoofed PICKUP_COLLECT from player %d (entityId=%d)", c.id, *in.EntityID)
 			return
 		}
-		hub.removePickup(*in.PickupID)
+
+		pickupID := *in.PickupID
+		if !hub.tryCollectPickup(pickupID, c.x, c.y, pickupCollectRangeSq) {
+			return
+		}
+
 		// Relay to all OTHER clients so they remove the pickup from their scene.
 		hub.broadcastJSON(PickupCollectMsg{
 			Type:     "PICKUP_COLLECT",
-			PickupID: *in.PickupID,
+			PickupID: pickupID,
 		}, c.id)
 
 	default:

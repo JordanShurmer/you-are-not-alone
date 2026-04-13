@@ -19,6 +19,8 @@
 //
 // Assets live at:  assets/sprites/<characterName>/<kind>.{png,json}
 
+import { CHARACTERS } from './sprites.js';
+
 // ---------------------------------------------------------------------------
 // Internal cache
 // ---------------------------------------------------------------------------
@@ -36,8 +38,7 @@ const _cache = new Map();
 /** Animation kinds we preload for every character. */
 export const ANIM_KINDS = ['idle', 'walk', 'run', 'attack', 'jump'];
 
-/** Character names that have downloaded sprite assets. */
-export const CHARACTERS = ['micah', 'wiz', 'george', 'sam', 'saint', 'titus', 'squire', 'jacque', 'ben', 'bartholemew', 'boniface', 'isaiah'];
+// Character roster is sourced from sprites.js to keep a single canonical list.
 
 // ---------------------------------------------------------------------------
 // Core loading

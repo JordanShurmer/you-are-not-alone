@@ -189,7 +189,7 @@ function buildHud(hudLayer) {
   hudLayer.addChild(hotbarGfx);
 
   for (let i = 0; i < HOTBAR_SLOTS; i++) {
-    // Slot number label (top-left corner) — positioned by repositionHud / updateHotbar
+    // Slot number label (top-left corner) — positioned by HUD reflow logic
     const numText = new PIXI.Text(`${i + 1}`, {
       fontFamily: 'monospace',
       fontSize:   9,
@@ -209,21 +209,28 @@ function buildHud(hudLayer) {
     hotbarTexts.push({ numText, countText });
   }
 
-  /**
-   * Reposition all viewport-anchored HUD elements to match the current window size.
-   * Called once at startup and again on every 'resize' event.
-   */
-  function repositionHud() {
+  // Cached viewport/layout values to avoid doing full HUD positioning every frame.
+  let hudW = -1;
+  let hudH = -1;
+  let hotbarX = 0;
+  let hotbarY = 0;
+
+  function reflowHudIfNeeded(force = false) {
     const W = getCanvasWidth();
     const H = getCanvasHeight();
+
+    if (!force && W === hudW && H === hudH) return;
+
+    hudW = W;
+    hudH = H;
 
     hint.x  = W / 2;
     hint.y  = H - 14;
     phase.x = W - 16;
     phase.y = H - 14;
 
-    const hotbarX = Math.round((W - HOTBAR_TOTAL) / 2);
-    const hotbarY = H - SLOT_SIZE - 40;
+    hotbarX = Math.round((W - HOTBAR_TOTAL) / 2);
+    hotbarY = H - SLOT_SIZE - 40;
 
     for (let i = 0; i < HOTBAR_SLOTS; i++) {
       const tx = hotbarX + i * (SLOT_SIZE + SLOT_MARGIN);
@@ -234,6 +241,14 @@ function buildHud(hudLayer) {
     }
   }
 
+  /**
+   * Reposition all viewport-anchored HUD elements to match the current window size.
+   * Called once at startup and again on every 'resize' event.
+   */
+  function repositionHud() {
+    reflowHudIfNeeded(true);
+  }
+
   // Set initial positions before the first frame.
   repositionHud();
 
@@ -242,11 +257,8 @@ function buildHud(hudLayer) {
     const slots   = getSlots();
     const selSlot = getSelectedSlot();
 
-    // Recompute hotbar position every frame so it stays centred after any resize.
-    const W       = getCanvasWidth();
-    const H       = getCanvasHeight();
-    const hotbarX = Math.round((W - HOTBAR_TOTAL) / 2);
-    const hotbarY = H - SLOT_SIZE - 40;
+    // Only reflow positions when viewport size changes.
+    reflowHudIfNeeded();
 
     for (let i = 0; i < HOTBAR_SLOTS; i++) {
       const tx         = hotbarX + i * (SLOT_SIZE + SLOT_MARGIN);
@@ -254,12 +266,6 @@ function buildHud(hudLayer) {
       const sy         = hotbarY;
       const slot       = slots[i];
       const isSelected = i === selSlot;
-
-      // Keep text labels in sync with the (possibly-updated) hotbar position.
-      hotbarTexts[i].numText.x   = tx + 3;
-      hotbarTexts[i].numText.y   = hotbarY + 3;
-      hotbarTexts[i].countText.x = tx + SLOT_SIZE - 3;
-      hotbarTexts[i].countText.y = hotbarY + SLOT_SIZE - 3;
 
       // Slot background
       hotbarGfx.beginFill(0x111118, isSelected ? 0.9 : 0.65);
@@ -285,12 +291,6 @@ function buildHud(hudLayer) {
       // Count text
       hotbarTexts[i].countText.text = slot.count > 0 ? String(slot.count) : '';
     }
-
-    // Keep bottom-anchored labels in sync on every frame too (cheap assignment).
-    hint.x  = W / 2;
-    hint.y  = H - 14;
-    phase.x = W - 16;
-    phase.y = H - 14;
   }
 
   return { statusText, updateHotbar, repositionHud };

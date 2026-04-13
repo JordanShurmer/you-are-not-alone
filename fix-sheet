@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# fix-sheet
+# Trim each frame in a spritesheet and bottom-align content inside each frame,
+# while preserving the original grid layout and frame size.
+#
+# Usage:
+#   ./fix-sheet input.png output.png
+#
+# Optional:
+#   FRAME_SIZE=256 ./fix-sheet input.png output.png
+
+if [ "$#" -ne 2 ]; then
+  echo "Usage: $0 input.png output.png" >&2
+  exit 1
+fi
+
+INPUT="$1"
+OUTPUT="$2"
+FRAME_SIZE="${FRAME_SIZE:-256}"
+
+if ! command -v magick >/dev/null 2>&1; then
+  echo "Error: ImageMagick ('magick') is required but not found in PATH." >&2
+  exit 1
+fi
+
+if [ ! -f "$INPUT" ]; then
+  echo "Error: input file not found: $INPUT" >&2
+  exit 1
+fi
+
+if ! [[ "$FRAME_SIZE" =~ ^[0-9]+$ ]] || [ "$FRAME_SIZE" -le 0 ]; then
+  echo "Error: FRAME_SIZE must be a positive integer (got '$FRAME_SIZE')." >&2
+  exit 1
+fi
+
+WIDTH="$(magick identify -ping -format "%w" "$INPUT")"
+HEIGHT="$(magick identify -ping -format "%h" "$INPUT")"
+
+if [ $((WIDTH % FRAME_SIZE)) -ne 0 ] || [ $((HEIGHT % FRAME_SIZE)) -ne 0 ]; then
+  echo "Error: input dimensions ${WIDTH}x${HEIGHT} are not divisible by FRAME_SIZE=${FRAME_SIZE}." >&2
+  exit 1
+fi
+
+COLS=$((WIDTH / FRAME_SIZE))
+ROWS=$((HEIGHT / FRAME_SIZE))
+
+TMP_DIR="$(mktemp -d)"
+RAW_DIR="$TMP_DIR/raw"
+PROC_DIR="$TMP_DIR/proc"
+mkdir -p "$RAW_DIR" "$PROC_DIR"
+
+cleanup() {
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
+# 1) Split into frames.
+magick "$INPUT" -crop "${FRAME_SIZE}x${FRAME_SIZE}" +repage "$RAW_DIR/frame_%06d.png"
+
+# 2) Per-frame trim + bottom align back to FRAME_SIZE x FRAME_SIZE.
+shopt -s nullglob
+for f in "$RAW_DIR"/frame_*.png; do
+  b="$(basename "$f")"
+  magick "$f" \
+    -trim +repage \
+    -background none \
+    -gravity south \
+    -extent "${FRAME_SIZE}x${FRAME_SIZE}" \
+    "$PROC_DIR/$b"
+done
+
+# 3) Reassemble in original grid.
+magick montage "$PROC_DIR"/frame_*.png \
+  -mode concatenate \
+  -tile "${COLS}x${ROWS}" \
+  -background none \
+  "$OUTPUT"
+
+echo "Wrote: $OUTPUT"
+echo "Frames: ${COLS}x${ROWS} (${FRAME_SIZE}x${FRAME_SIZE} each)"

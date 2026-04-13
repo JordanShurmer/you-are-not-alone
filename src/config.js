@@ -20,5 +20,4 @@ export const LIGHT_RADIUS = 180;
 // Phase 5 — Block interaction
 /** World-space pixel radius within which a player can mine/place. */
 export const MINING_RANGE_PX = 192;
-/** Number of hotbar slots. */
-export const HOTBAR_SLOTS = 5;
+
