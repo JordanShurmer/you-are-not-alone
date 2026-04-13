@@ -19,7 +19,6 @@ import {
   isWorldLoaded,
   getWorldData,
   getTileSize,
-  TILE_COLORS,
   getWorldPixelWidth,
   getWorldPixelHeight,
 } from './world.js';
@@ -31,9 +30,12 @@ import { SPRITE_SCALE, ANIM_SPEED, LOOPS, getAnimState } from './sprites.js';
 // Camera
 // ---------------------------------------------------------------------------
 
-/** Player viewport vertical offset — shows a bit more terrain below player. */
-/** Recomputed each frame so resizing doesn't shift the vertical viewport anchor. */
-function _camYOffset() { return getCanvasHeight() * 0.45; }
+/**
+ * How far from the top of the screen the player's centre sits.
+ * Set to ~0.78 so the ground (player feet) lands at roughly 4/5 down —
+ * i.e. 1/5 from the bottom — giving a wide, airy sky.
+ */
+function _camYOffset() { return getCanvasHeight() * 0.78; }
 
 // ---------------------------------------------------------------------------
 // Layer references (initialised lazily on first render call)
@@ -70,14 +72,11 @@ const _liveIds = new Set();
 // ---------------------------------------------------------------------------
 
 /** @type {PIXI.Graphics|null} */
-let _tileGfx = null;
+let _groundGfx = null;
 
-const _tileCache = {
-  worldWidth: -1, worldHeight: -1, tileSize: -1,
-  worldRevision: -1,
-  startX: -1, endX: -1, startY: -1, endY: -1,
-  valid: false,
-};
+/** Cached per-column surface Y (world-px). Rebuilt when world revision changes. */
+let _groundSurface   = null;   // Float32Array, length = world tile width
+let _groundRevision  = -1;
 
 // ---------------------------------------------------------------------------
 // Darkness / lighting state
@@ -142,10 +141,8 @@ export function render(worldLayer, darknessLayer, entities, miningState) {
   worldLayer.x = -Math.round(camX);
   worldLayer.y = -Math.round(camY);
 
-  // ── Terrain ──────────────────────────────────────────────────────────────
-  if (isWorldLoaded()) {
-    _renderTilesIfNeeded(worldLayer, camX, camY);
-  }
+  // ── Ground ───────────────────────────────────────────────────────────────
+  _renderGround(worldLayer, camX, camY);
 
   // ── Entity visuals ───────────────────────────────────────────────────────
   _liveIds.clear();
@@ -432,55 +429,98 @@ function _getGradientTexture(radius) {
 // Terrain
 // ---------------------------------------------------------------------------
 
-function _renderTilesIfNeeded(worldLayer, camX, camY) {
-  if (!_tileGfx) {
-    _tileGfx = new PIXI.Graphics();
-    worldLayer.addChildAt(_tileGfx, 0);          // behind everything
+/**
+ * Draw a smooth, slightly rolling ground fill in a papery off-white.
+ *
+ * The ground surface is derived from the tile data (first solid tile per
+ * column), lightly smoothed, then rendered as a single filled polygon that
+ * extends from the surface down to the bottom of the world.  No grid, no
+ * individual tile colours — just a clean organic landmass.
+ *
+ * When the world isn't loaded yet the function is a no-op.
+ */
+function _renderGround(worldLayer, camX, camY) {
+  if (!isWorldLoaded()) return;
+
+  if (!_groundGfx) {
+    _groundGfx = new PIXI.Graphics();
+    worldLayer.addChildAt(_groundGfx, 0);   // behind entities
   }
 
   const world = getWorldData();
   const { tiles, width, height, tileSize: ts, revision } = world;
+  if (!tiles) return;
 
-  const startX = Math.max(0,          Math.floor(camX / ts) - 1);
-  const endX   = Math.min(width  - 1, Math.ceil((camX + getCanvasWidth())  / ts) + 1);
-  const startY = Math.max(0,          Math.floor(camY / ts) - 1);
-  const endY   = Math.min(height - 1, Math.ceil((camY + getCanvasHeight()) / ts) + 1);
-
-  const sameWindow =
-    _tileCache.valid &&
-    _tileCache.worldWidth    === width    &&
-    _tileCache.worldHeight   === height   &&
-    _tileCache.tileSize      === ts       &&
-    _tileCache.worldRevision === revision &&
-    _tileCache.startX === startX && _tileCache.endX === endX &&
-    _tileCache.startY === startY && _tileCache.endY === endY;
-
-  if (sameWindow) return;
-
-  _tileGfx.clear();
-
-  for (let ty = startY; ty <= endY; ty++) {
-    const row = ty * width;
-    const py  = ty * ts;
-
-    for (let tx = startX; tx <= endX; tx++) {
-      const tileType = tiles[row + tx];
-      if (tileType === 0) continue;
-
-      const color = TILE_COLORS[tileType] ?? 0x888888;
-      _tileGfx.beginFill(color);
-      _tileGfx.drawRect(tx * ts, py, ts, ts);
-      _tileGfx.endFill();
+  // ── Rebuild surface cache when world data changes ─────────────────────────
+  if (revision !== _groundRevision || !_groundSurface) {
+    _groundSurface  = new Float32Array(width);
+    for (let tx = 0; tx < width; tx++) {
+      let surfaceY = height * ts;           // default: world floor
+      for (let ty = 0; ty < height; ty++) {
+        if (tiles[ty * width + tx] !== 0) {
+          surfaceY = ty * ts;
+          break;
+        }
+      }
+      _groundSurface[tx] = surfaceY;
     }
+    _groundRevision = revision;
   }
 
-  _tileCache.worldWidth    = width;
-  _tileCache.worldHeight   = height;
-  _tileCache.tileSize      = ts;
-  _tileCache.worldRevision = revision;
-  _tileCache.startX = startX; _tileCache.endX = endX;
-  _tileCache.startY = startY; _tileCache.endY = endY;
-  _tileCache.valid  = true;
+  // ── Determine the tile columns that are (slightly) off-screen ─────────────
+  const W      = getCanvasWidth();
+  const worldH = height * ts;
+
+  // Add generous margin so the polygon never has a visible left/right gap.
+  const startTx = Math.max(0,         Math.floor(camX / ts) - 3);
+  const endTx   = Math.min(width - 1, Math.ceil((camX + W) / ts) + 3);
+
+  // ── Build smoothed surface points ─────────────────────────────────────────
+  // Average over a small window (±4 tiles) to soften any hard tile steps.
+  const SMOOTH_R = 4;
+  const pts = [];   // [{x, y}] in world-px
+
+  for (let tx = startTx; tx <= endTx; tx++) {
+    let sum = 0, n = 0;
+    for (let d = -SMOOTH_R; d <= SMOOTH_R; d++) {
+      const nx = Math.max(0, Math.min(width - 1, tx + d));
+      // Weight: closer columns matter more (triangle kernel)
+      const w = SMOOTH_R + 1 - Math.abs(d);
+      sum += _groundSurface[nx] * w;
+      n   += w;
+    }
+    pts.push({ x: tx * ts + ts * 0.5, y: sum / n });
+  }
+
+  // ── Draw filled ground polygon ─────────────────────────────────────────────
+  // Papery off-white — warm, slightly yellowish, like uncoated paper.
+  const GROUND_COLOR = 0xf5e6c8;
+
+  _groundGfx.clear();
+  _groundGfx.beginFill(GROUND_COLOR, 1);
+
+  // Start at bottom-left corner, trace surface left→right, close at bottom-right.
+  const leftX  = pts[0].x;
+  const rightX = pts[pts.length - 1].x;
+
+  _groundGfx.moveTo(leftX,  worldH + 200);
+  _groundGfx.lineTo(leftX,  pts[0].y);
+
+  // Use quadratic Bézier midpoints for a silky smooth curve.
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i];
+    const p1 = pts[i + 1];
+    const mx = (p0.x + p1.x) * 0.5;
+    const my = (p0.y + p1.y) * 0.5;
+    _groundGfx.quadraticCurveTo(p0.x, p0.y, mx, my);
+  }
+  // Finish curve through the last point
+  const last = pts[pts.length - 1];
+  _groundGfx.lineTo(last.x, last.y);
+
+  _groundGfx.lineTo(rightX, worldH + 200);
+  _groundGfx.closePath();
+  _groundGfx.endFill();
 }
 
 // ---------------------------------------------------------------------------

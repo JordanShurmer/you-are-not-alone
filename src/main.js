@@ -10,6 +10,8 @@ import { getCanvasWidth, getCanvasHeight, BG_COLOR } from './config.js';
 import { preloadAllCharacters } from './assetLoader.js';
 import { getSlots, getSelectedSlot, HOTBAR_SLOTS } from './inventory.js';
 import { TILE_COLORS } from './world.js';
+import { getCameraPosition } from './camera.js';
+import { initParallax, updateParallax } from './parallax.js';
 
 /** How often (seconds) to broadcast our position + velocity for drift correction. */
 const POSITION_SYNC_INTERVAL = 0.1;
@@ -23,7 +25,9 @@ const STATUS_SAMPLE_INTERVAL = 0.2;
   await preloadAllCharacters();
 
   const app = createApp();
-  const { worldLayer, darknessLayer, hudLayer } = createLayers(app.stage);
+  const { parallaxLayer, worldLayer, darknessLayer, hudLayer } = createLayers(app.stage);
+
+  await initParallax(parallaxLayer);
 
   setupInput();
   setupNetwork();
@@ -85,6 +89,7 @@ const STATUS_SAMPLE_INTERVAL = 0.2;
     }
 
     render(worldLayer, darknessLayer, entities, getMiningState());
+    updateParallax(getCameraPosition().x);
 
     // Hotbar — update every frame (cheap Graphics redraw, also keeps positions in sync)
     updateHotbar();
@@ -124,17 +129,20 @@ function createApp() {
 }
 
 function createLayers(stage) {
+  // parallaxLayer sits behind everything — added first so it's at index 0.
+  const parallaxLayer = new PIXI.Container();
   const worldLayer    = new PIXI.Container();
   // darknessLayer sits between the world and the HUD so it darkens terrain
   // and entities but never obscures status text or controls hint.
   const darknessLayer = new PIXI.Container();
   const hudLayer      = new PIXI.Container();
 
+  stage.addChild(parallaxLayer);
   stage.addChild(worldLayer);
   stage.addChild(darknessLayer);
   stage.addChild(hudLayer);
 
-  return { worldLayer, darknessLayer, hudLayer };
+  return { parallaxLayer, worldLayer, darknessLayer, hudLayer };
 }
 
 function buildHud(hudLayer) {

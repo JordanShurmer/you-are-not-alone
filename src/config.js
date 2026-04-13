@@ -5,7 +5,7 @@
 // just more world visible).
 export function getCanvasWidth()  { return window.innerWidth;  }
 export function getCanvasHeight() { return window.innerHeight; }
-export const BG_COLOR = 0x0d0d1a;
+export const BG_COLOR = 0xdedad4;
 
 // Player dimensions (visual + collision box for Phase 3)
 export const PLAYER_WIDTH = 18;
@@ -15,7 +15,7 @@ export const PLAYER_BOX_OFFSET_Y = 0;
 
 // Phase 4 — lighting
 /** Radius in world-space pixels of each player's carried light source. */
-export const LIGHT_RADIUS = 180;
+export const LIGHT_RADIUS = 1800;
 
 // Phase 5 — Block interaction
 /** World-space pixel radius within which a player can mine/place. */
