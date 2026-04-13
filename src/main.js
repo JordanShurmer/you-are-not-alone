@@ -1,4 +1,4 @@
-// main.js — Entry point for Phase 5: Breaking and Placing.
+// main.js — Entry point for Phase 6: Sprites, Animations & Visual Identity.
 
 import { entities, getEntity } from './entities.js';
 import { drainActions } from './actions.js';
@@ -7,6 +7,7 @@ import { processActions, update, drainOutboundActions } from './update.js';
 import { render } from './render.js';
 import { setupNetwork, getLocalPlayerId, sendAction } from './network.js';
 import { CANVAS_WIDTH, CANVAS_HEIGHT, BG_COLOR } from './config.js';
+import { preloadAllCharacters } from './assetLoader.js';
 import { getSlots, getSelectedSlot, HOTBAR_SLOTS } from './inventory.js';
 import { TILE_COLORS } from './world.js';
 
@@ -16,7 +17,11 @@ const POSITION_SYNC_INTERVAL = 0.1;
 /** How often (seconds) to recount players for HUD status text. */
 const STATUS_SAMPLE_INTERVAL = 0.2;
 
-(function boot() {
+(async function boot() {
+  // Phase 6 — preload all AutoSprite character spritesheets before the game loop starts.
+  // This is fast since assets are served locally from assets/sprites/.
+  await preloadAllCharacters();
+
   const app = createApp();
   const { worldLayer, darknessLayer, hudLayer } = createLayers(app.stage);
 
@@ -142,7 +147,7 @@ function buildHud(hudLayer) {
   hudLayer.addChild(title);
 
   const hint = new PIXI.Text(
-    'A/D move   W/↑ jump   Space boost   LClick mine   RClick place   1-5 slot',
+    'A/D · W/↑ jump · Space boost · LClick mine · RClick place · 1-5 slot',
     style(12, 0x3a4a6a),
   );
   hint.anchor.set(0.5, 1);
@@ -150,7 +155,7 @@ function buildHud(hudLayer) {
   hint.y = CANVAS_HEIGHT - 14;
   hudLayer.addChild(hint);
 
-  const phase = new PIXI.Text('Phase 5 — Breaking and Placing', style(10, 0x2a3a5a));
+  const phase = new PIXI.Text('Phase 6 — Sprites & Animations', style(10, 0x2a3a5a));
   phase.anchor.set(1, 1);
   phase.x = CANVAS_WIDTH - 16;
   phase.y = CANVAS_HEIGHT - 14;

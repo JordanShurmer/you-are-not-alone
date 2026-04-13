@@ -86,10 +86,43 @@ Multiplayer is the soul of this game, so it's established immediately. Every fea
 
 **Playable result:** Dig tunnels together, build walls together. Sand pours into your tunnel if you're careless. Stone pushes back until you have the right tool. One player digs while the other lights the way. The world feels like it has *substance*. Cooperation already feels natural.
 
+---
+
+## Phase 6: Sprites, Animations & Visual Identity
+
+**Goal:** Replace programmer-art rectangles with real character sprites and smooth animations, powered by the spritesheets and JSON atlases already created in AutoSprite.
+
+> **Note:** Use the **AutoSprite MCP** to find the characters already created, download their spritesheets and JSON texture atlases, and wire them directly into PixiJS's `AnimatedSprite` system. No need to draw from scratch — the assets exist, we just need to integrate them.
+
+### Drawing a Character
+- Use the AutoSprite MCP (`list_characters`, `get_character`) to retrieve all characters created so far
+- Download the spritesheet PNG and JSON atlas for each character
+- Commit the downloaded assets into `assets/sprites/` (organized by character name)
+- Replace each player entity's colored-rectangle `.image` with a PixiJS `Sprite` loaded from the spritesheet
+- Wire up the JSON atlas so PixiJS can address individual frames by name
+
+### Animations
+- Load all animation strips from the atlas (idle, walk, run, attack, jump — whatever was generated)
+- Implement an `AnimatedSprite` state machine per entity: transitions between animation states based on entity velocity, action, and physics state
+  - Standing still → `idle` loop
+  - Moving left/right → `walk` or `run` loop (flipped horizontally for left)
+  - In the air → `jump` frame
+  - Attacking → `attack` strip, then return to idle
+- Animation state is derived from entity data — no separate animation state needed
+- Different characters (e.g. player 1 vs player 2) can use different character sprites from AutoSprite
+- Enemies introduced later can also be seeded from AutoSprite characters
+
+### Integration
+- All sprite loading goes through a single `AssetLoader` that reads the JSON atlas and returns frame references
+- PixiJS `Ticker` drives the `AnimatedSprite` frame advancement — no custom frame timers
+- Sprites are centered on the entity's `.box` collision rect so physics and visuals stay aligned
+- Shadow/ground-contact marker rendered under each character for depth readability in darkness
+
+**Playable result:** The game looks like an actual game. Real characters with walking and idle animations replace the rectangles. Two animated adventurers explore a dark world together. Every subsequent phase builds on real visuals from here on out.
 
 ---
 
-## Phase 6: Home and Hearth
+## Phase 7: Home and Hearth
 
 **Goal:** Build a rudimentary village with crafting, torches, and shelter.
 
@@ -105,7 +138,7 @@ Multiplayer is the soul of this game, so it's established immediately. Every fea
 
 ---
 
-## Phase 7: Slay the Dragon
+## Phase 8: Slay the Dragon
 
 **Goal:** A complete game loop — enemies threaten you, a dragon attacks, you kill it, you win.
 
@@ -123,7 +156,7 @@ Multiplayer is the soul of this game, so it's established immediately. Every fea
 
 ---
 
-## Phase 8: Stronger Together
+## Phase 9: Stronger Together
 
 **Goal:** Co-op is mechanically essential for hard content; solo play has its own quieter loop.
 
@@ -138,7 +171,7 @@ Multiplayer is the soul of this game, so it's established immediately. Every fea
 
 ---
 
-## Phase 9: The World Feels Alive
+## Phase 10: The World Feels Alive
 
 **Goal:** NPCs, a family, and a reason to care about your village.
 
@@ -153,7 +186,7 @@ Multiplayer is the soul of this game, so it's established immediately. Every fea
 
 ---
 
-## Phase 10: Art and Soul
+## Phase 11: Art and Soul
 
 **Goal:** Replace programmer art with the whimsical hand-drawn style. Polish everything.
 
@@ -169,7 +202,7 @@ Multiplayer is the soul of this game, so it's established immediately. Every fea
 
 ---
 
-## Phase 11: The Dragon War
+## Phase 12: The Dragon War
 
 **Goal:** An endgame with depth. Escalating difficulty and a final boss worth fighting.
 
@@ -193,12 +226,13 @@ Multiplayer is the soul of this game, so it's established immediately. Every fea
 | 3 | Run and jump on shared terrain | Physics, collision, world gen, camera |
 | 4 | Carry light together through darkness | Lighting, co-op visibility |
 | 5 | Dig and build together | Block interaction, inventory |
-| 6 | Craft, shelter, and arm up | Crafting, placeable objects, day/night |
-| 7 | Kill the dragon and hit the leaderboard | Combat, enemies, AI, end game, leaderboard |
-| 8 | Progress and specialize | Co-op scaling, farming, tinkering |
-| 9 | Care about your village | NPCs, quests, biomes |
-| 10 | Marvel at the art | Visual and audio polish |
-| 11 | Save the day (for real) | Boss phases, progression, escalation |
+| 6 | See real characters with animations | AutoSprite spritesheets, JSON atlas, AnimatedSprite |
+| 7 | Craft, shelter, and arm up | Crafting, placeable objects, day/night |
+| 8 | Kill the dragon and hit the leaderboard | Combat, enemies, AI, end game, leaderboard |
+| 9 | Progress and specialize | Co-op scaling, farming, tinkering |
+| 10 | Care about your village | NPCs, quests, biomes |
+| 11 | Marvel at the art | Visual and audio polish |
+| 12 | Save the day (for real) | Boss phases, progression, escalation |
 
 ---
 

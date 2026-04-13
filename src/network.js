@@ -8,6 +8,10 @@
 //   - _normalizeWorld accepts tile type 3 (sand)
 //   - _normalizeWelcome includes pickups field
 //   - WELCOME handler spawns pickups from initial state
+//
+// Phase 6 additions:
+//   - Each spawned player entity gets a .character property (from sprites.js)
+//     so the renderer knows which AutoSprite skin to use.
 
 import { enqueueAction } from './actions.js';
 import { createEntity, destroyEntity, clearEntities, getEntity } from './entities.js';
@@ -19,6 +23,7 @@ import {
   PLAYER_BOX_OFFSET_Y,
   LIGHT_RADIUS,
 } from './config.js';
+import { characterForId } from './sprites.js';
 
 // ---------------------------------------------------------------------------
 // Module state
@@ -581,9 +586,12 @@ function _spawnPlayer(id, x, y, colorHex, isLocal) {
     offsetY: PLAYER_BOX_OFFSET_Y,
   };
 
+  const character = characterForId(id);
+
   if (existing) {
-    existing.isPlayer = true;
-    existing.isLocal = isLocal;
+    existing.isPlayer  = true;
+    existing.isLocal   = isLocal;
+    existing.character = character;
 
     if (!existing.position) existing.position = { x: 0, y: 0 };
     existing.position.x = x;
@@ -594,32 +602,33 @@ function _spawnPlayer(id, x, y, colorHex, isLocal) {
     existing.velocity.y = 0;
 
     if (!existing.physics) existing.physics = {};
-    existing.physics.onGround = false;
-    existing.physics.moveInput = 0;
+    existing.physics.onGround       = false;
+    existing.physics.moveInput      = 0;
     existing.physics.jumpBufferTimer = 0;
-    existing.physics.coyoteTimer = 0;
-    existing.physics.jumpHeld = false;
-    existing.physics.boostSpeed = 160;
+    existing.physics.coyoteTimer    = 0;
+    existing.physics.jumpHeld       = false;
+    existing.physics.boostSpeed     = 160;
 
     existing.image = image;
-    existing.box = box;
+    existing.box   = box;
     if (!existing.lightsource) existing.lightsource = { radius: LIGHT_RADIUS, offsetX: 0, offsetY: 0 };
     return;
   }
 
   createEntity({
     id,
-    isPlayer: true,
+    isPlayer:  true,
     isLocal,
+    character, // Phase 6 — AutoSprite skin name ('micah', 'wiz', 'george', 'sam')
     position: { x, y },
     velocity: { x: 0, y: 0 },
     physics: {
-      onGround: false,
-      moveInput: 0,
+      onGround:        false,
+      moveInput:       0,
       jumpBufferTimer: 0,
-      coyoteTimer: 0,
-      jumpHeld: false,
-      boostSpeed: 160,
+      coyoteTimer:     0,
+      jumpHeld:        false,
+      boostSpeed:      160,
     },
     image,
     box,

@@ -1,14 +1,18 @@
-// render.js — Phase 5 renderer: camera + terrain + entities + darkness & light + mining overlay.
+// render.js — Phase 6: Sprites, Animations & Visual Identity.
 //
-// Phase 4 features retained:
-//   - Accepts a `darknessLayer` container (sits above worldLayer in the stage)
-//   - Any entity with `.lightsource { radius }` cuts a soft radial hole in the darkness
-//   - Gradient textures are generated once via Canvas API and cached by radius
-//   - PIXI.BLEND_MODES.ERASE on a container with a filter gives true alpha-subtraction
+// Replaces the Phase 5 coloured-rectangle player renderer with PixiJS
+// AnimatedSprite objects driven by the AutoSprite spritesheet assets.
 //
-// Phase 5 additions:
-//   - setCameraPosition() called each frame so input.js can convert screen→world coords
-//   - Accepts `miningState` and renders a tile-break progress overlay on worldLayer
+// Layer order inside worldLayer (offset each frame by camera):
+//   [0] _tileGfx          — terrain rectangles
+//   [1] _entitiesContainer — all entity visuals (sprites + pickup graphics)
+//   [2] _miningOverlay    — semi-transparent tile-break progress
+//
+// Entity types:
+//   • entity.character   → AnimatedSprite (players; loaded via assetLoader.js)
+//   • entity.image       → PIXI.Graphics rectangle (pickups, legacy)
+//
+// Phase 4 darkness / lighting layer is retained unchanged on darknessLayer.
 
 import { setCameraPosition } from './camera.js';
 import {
@@ -20,22 +24,44 @@ import {
   getWorldPixelHeight,
 } from './world.js';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from './config.js';
+import { getFrames }                   from './assetLoader.js';
+import { SPRITE_SCALE, ANIM_SPEED, LOOPS, getAnimState } from './sprites.js';
 
 // ---------------------------------------------------------------------------
 // Camera
 // ---------------------------------------------------------------------------
 
-// Local player appears slightly above vertical centre for better look-ahead.
+/** Player viewport vertical offset — shows a bit more terrain below player. */
 const CAM_Y_OFFSET = CANVAS_HEIGHT * 0.45;
 
 // ---------------------------------------------------------------------------
-// Entity sprite pool
+// Layer references (initialised lazily on first render call)
 // ---------------------------------------------------------------------------
 
-/** @type {Map<number, PIXI.Graphics>} entityId -> display object */
-const _displayObjects = new Map();
+/** @type {PIXI.Container|null} */
+let _entitiesContainer = null;
 
-/** @type {Set<number>} scratch set — which ids are alive this frame */
+// ---------------------------------------------------------------------------
+// Entity sprite pool — character-based (AnimatedSprite)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-entity sprite state.
+ *
+ * @typedef {{ container: PIXI.Container, sprite: PIXI.AnimatedSprite,
+ *             shadow: PIXI.Graphics, state: string, facing: number }} SpriteObj
+ * @type {Map<number, SpriteObj>}
+ */
+const _spriteObjects = new Map();
+
+// ---------------------------------------------------------------------------
+// Entity graphics pool — image-based (PIXI.Graphics for pickups etc.)
+// ---------------------------------------------------------------------------
+
+/** @type {Map<number, PIXI.Graphics>} */
+const _graphicsObjects = new Map();
+
+/** @type {Set<number>} ids of entities alive this frame */
 const _liveIds = new Set();
 
 // ---------------------------------------------------------------------------
@@ -56,20 +82,16 @@ const _tileCache = {
 // Darkness / lighting state
 // ---------------------------------------------------------------------------
 
-/** Whether the darkness layer has been bootstrapped yet. */
 let _darknessReady = false;
 
 /**
  * Gradient textures keyed by rounded radius (px).
- * Built once via Canvas API; PIXI keeps the GPU texture alive.
  * @type {Map<number, PIXI.Texture>}
  */
 const _gradientCache = new Map();
 
 /**
- * One ERASE-blend Sprite per lightsource entity, keyed by entity id.
- * Created on first sight, repositioned every frame, destroyed when the
- * entity loses its .lightsource or is removed from the world.
+ * ERASE-blend sprites keyed by entity id.
  * @type {Map<number, PIXI.Sprite>}
  */
 const _lightSprites = new Map();
@@ -86,15 +108,22 @@ let _miningOverlay = null;
 // ---------------------------------------------------------------------------
 
 /**
- * Sync the Pixi scene with current game state.
+ * Sync the PixiJS scene with current game state.
  *
- * @param {PIXI.Container} worldLayer    - world-space layer (offset by camera)
- * @param {PIXI.Container} darknessLayer - screen-space darkness overlay
- * @param {Array<Object>}  entities      - full entity array
+ * @param {PIXI.Container} worldLayer
+ * @param {PIXI.Container} darknessLayer
+ * @param {Array<Object>}  entities
  * @param {{ tx:number, ty:number, progress:number, hardness:number }|null} [miningState]
  */
 export function render(worldLayer, darknessLayer, entities, miningState) {
-  // ── Camera ─────────────────────────────────────────────────────────────
+
+  // ── Lazy-init sub-container for entities ────────────────────────────────
+  if (!_entitiesContainer) {
+    _entitiesContainer = new PIXI.Container();
+    worldLayer.addChild(_entitiesContainer);
+  }
+
+  // ── Camera ───────────────────────────────────────────────────────────────
   const local = _findLocalPlayer(entities);
   let camX = 0;
   let camY = 0;
@@ -106,47 +135,57 @@ export function render(worldLayer, darknessLayer, entities, miningState) {
     camY = Math.max(0, Math.min(local.position.y - CAM_Y_OFFSET,      maxY));
   }
 
-  // Share camera position with input.js for screen→world coordinate conversion.
   setCameraPosition(camX, camY);
-
   worldLayer.x = -Math.round(camX);
   worldLayer.y = -Math.round(camY);
 
-  // ── Terrain ─────────────────────────────────────────────────────────────
+  // ── Terrain ──────────────────────────────────────────────────────────────
   if (isWorldLoaded()) {
     _renderTilesIfNeeded(worldLayer, camX, camY);
   }
 
-  // ── Entity sprites ───────────────────────────────────────────────────────
+  // ── Entity visuals ───────────────────────────────────────────────────────
   _liveIds.clear();
 
   for (let i = 0; i < entities.length; i++) {
     const entity = entities[i];
-    if (!entity?.image || !entity?.position) continue;
+    if (!entity?.position) continue;
 
-    const { id, image, position } = entity;
+    const { id } = entity;
     _liveIds.add(id);
 
-    let gfx = _displayObjects.get(id);
-    if (!gfx) {
-      gfx = _buildEntityGfx(image);
-      _displayObjects.set(id, gfx);
-      worldLayer.addChild(gfx);
+    if (entity.character) {
+      // ── Animated character sprite ────────────────────────────────────────
+      // Remove any legacy graphics leftover for this id (shouldn't happen, but safe).
+      _removeGraphics(id);
+      _updateCharacterSprite(entity);
+
+    } else if (entity.image) {
+      // ── Coloured-rectangle fallback (pickups, etc.) ──────────────────────
+      // Remove any leftover sprite for this id.
+      _removeSprite(id);
+
+      const { position, image } = entity;
+      let gfx = _graphicsObjects.get(id);
+      if (!gfx) {
+        gfx = _buildEntityGfx(image);
+        _graphicsObjects.set(id, gfx);
+        _entitiesContainer.addChild(gfx);
+      }
+      gfx.x = Math.round(position.x - image.width  / 2);
+      gfx.y = Math.round(position.y - image.height / 2);
     }
-
-    gfx.x = Math.round(position.x - image.width  / 2);
-    gfx.y = Math.round(position.y - image.height / 2);
   }
 
-  // Remove sprites for entities that no longer exist.
-  for (const [id, gfx] of _displayObjects) {
-    if (_liveIds.has(id)) continue;
-    worldLayer.removeChild(gfx);
-    gfx.destroy();
-    _displayObjects.delete(id);
+  // ── Garbage-collect removed entities ────────────────────────────────────
+  for (const id of _spriteObjects.keys()) {
+    if (!_liveIds.has(id)) _removeSprite(id);
+  }
+  for (const id of _graphicsObjects.keys()) {
+    if (!_liveIds.has(id)) _removeGraphics(id);
   }
 
-  // ── Mining overlay ────────────────────────────────────────────────────────
+  // ── Mining overlay ───────────────────────────────────────────────────────
   _renderMiningOverlay(worldLayer, miningState ?? null);
 
   // ── Darkness + light holes ───────────────────────────────────────────────
@@ -154,15 +193,121 @@ export function render(worldLayer, darknessLayer, entities, miningState) {
 }
 
 // ---------------------------------------------------------------------------
-// Mining overlay helpers
+// Character sprite helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Draw (or clear) the tile-break progress overlay on worldLayer.
+ * Create or update the AnimatedSprite for a character-based entity.
  *
- * @param {PIXI.Container} worldLayer
- * @param {{ tx:number, ty:number, progress:number, hardness:number }|null} miningState
+ * Layout inside the container (origin = entity's bottom-centre):
+ *   shadow  → ellipse at (0, 2)  — ground contact indicator
+ *   sprite  → anchor (0.5, 1)   — grows upward from origin
+ *
+ * @param {Object} entity
  */
+function _updateCharacterSprite(entity) {
+  const { id, position, velocity, box, character } = entity;
+
+  // Entity bottom-centre in world space
+  const bx = Math.round(position.x + (box?.offsetX ?? 0));
+  const by = Math.round(position.y + (box?.offsetY ?? 0) + (box?.height ?? 0) / 2);
+
+  let obj = _spriteObjects.get(id);
+
+  if (!obj) {
+    obj = _createCharacterSprite(character);
+    _spriteObjects.set(id, obj);
+    _entitiesContainer.addChild(obj.container);
+  }
+
+  // ── Position ─────────────────────────────────────────────────────────────
+  obj.container.x = bx;
+  obj.container.y = by;
+
+  // ── Facing direction (sticky — only changes when velocity is meaningful) ─
+  const vx = velocity?.x ?? 0;
+  if (vx < -8)      obj.facing = -1;
+  else if (vx > 8)  obj.facing =  1;
+
+  // ── Animation state machine ───────────────────────────────────────────────
+  const newState = getAnimState(entity);
+
+  if (newState !== obj.state) {
+    const frames = getFrames(character, newState);
+    if (frames && frames.length > 0) {
+      obj.sprite.textures        = frames;
+      obj.sprite.animationSpeed  = ANIM_SPEED[newState] ?? 0.2;
+      obj.sprite.loop            = LOOPS.has(newState);
+      obj.sprite.gotoAndPlay(0);
+    }
+    obj.state = newState;
+  }
+
+  // ── Apply scale (negative x = flip for left-facing) ──────────────────────
+  obj.sprite.scale.x = obj.facing * SPRITE_SCALE;
+  obj.sprite.scale.y = SPRITE_SCALE;
+}
+
+/**
+ * Build a fresh SpriteObj for the given character name.
+ *
+ * @param   {string}    characterName
+ * @returns {SpriteObj}
+ */
+function _createCharacterSprite(characterName) {
+  const container = new PIXI.Container();
+
+  // Ground-contact shadow (rendered below the sprite)
+  const shadow = new PIXI.Graphics();
+  shadow.beginFill(0x000000, 0.28);
+  shadow.drawEllipse(0, 2, 13, 4);
+  shadow.endFill();
+  container.addChild(shadow);
+
+  // Animated sprite
+  const idleFrames = getFrames(characterName, 'idle') ?? [PIXI.Texture.WHITE];
+  const sprite     = new PIXI.AnimatedSprite(idleFrames);
+  sprite.anchor.set(0.5, 1);       // bottom-centre pivot
+  sprite.scale.set(SPRITE_SCALE);
+  sprite.animationSpeed = ANIM_SPEED.idle;
+  sprite.loop           = true;
+  sprite.play();
+  container.addChild(sprite);
+
+  return { container, sprite, shadow, state: 'idle', facing: 1 };
+}
+
+/**
+ * Destroy and remove an animated sprite object from the scene.
+ *
+ * @param {number} id
+ */
+function _removeSprite(id) {
+  const obj = _spriteObjects.get(id);
+  if (!obj) return;
+  obj.sprite.stop();
+  _entitiesContainer.removeChild(obj.container);
+  obj.container.destroy({ children: true });
+  _spriteObjects.delete(id);
+}
+
+/**
+ * Destroy and remove a graphics object from the scene.
+ *
+ * @param {number} id
+ */
+function _removeGraphics(id) {
+  const gfx = _graphicsObjects.get(id);
+  if (!gfx) return;
+  _entitiesContainer.removeChild(gfx);
+  gfx.destroy();
+  _graphicsObjects.delete(id);
+}
+
+// ---------------------------------------------------------------------------
+// Mining overlay helpers
+// ---------------------------------------------------------------------------
+
 function _renderMiningOverlay(worldLayer, miningState) {
   if (!_miningOverlay) {
     _miningOverlay = new PIXI.Graphics();
@@ -170,28 +315,23 @@ function _renderMiningOverlay(worldLayer, miningState) {
   }
 
   _miningOverlay.clear();
-
   if (!miningState) return;
 
   const { tx, ty, progress, hardness } = miningState;
   const ts    = getTileSize();
   const ratio = Math.min(progress / hardness, 1);
+  const x     = tx * ts;
+  const y     = ty * ts;
 
-  const x = tx * ts;
-  const y = ty * ts;
-
-  // Darkening overlay that deepens as the tile is mined
   _miningOverlay.beginFill(0x000000, 0.15 + 0.5 * ratio);
   _miningOverlay.drawRect(x, y, ts, ts);
   _miningOverlay.endFill();
 
-  // Progress bar track at the bottom of the tile
   const barH = 4;
   _miningOverlay.beginFill(0x000000, 0.7);
   _miningOverlay.drawRect(x, y + ts - barH, ts, barH);
   _miningOverlay.endFill();
 
-  // Progress bar fill
   _miningOverlay.beginFill(0xffffff, 0.9);
   _miningOverlay.drawRect(x, y + ts - barH, Math.round(ts * ratio), barH);
   _miningOverlay.endFill();
@@ -201,25 +341,6 @@ function _renderMiningOverlay(worldLayer, miningState) {
 // Darkness helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Bootstrap the darkness container on first call, then every frame:
- *   1. Find all entities that duck-type as lightsources (.lightsource.radius).
- *   2. Give each one an ERASE-blend gradient sprite positioned in screen-space.
- *   3. Remove sprites for entities that have lost their lightsource or died.
- *
- * Why AlphaFilter?
- *   PIXI.BLEND_MODES.ERASE subtracts alpha from its *parent's framebuffer*.
- *   A plain Container composites directly onto the stage, so ERASE bleeds
- *   through everything.  Setting any filter on the Container forces PIXI to
- *   first render it into an isolated off-screen texture; ERASE then correctly
- *   punches holes only within that texture.  AlphaFilter(0.96) doubles as the
- *   overall darkness opacity — 96 % opaque, 4 % ambient.
- *
- * @param {PIXI.Container} layer
- * @param {Array<Object>}  entities
- * @param {number}         camX
- * @param {number}         camY
- */
 function _updateDarkness(layer, entities, camX, camY) {
   if (!_darknessReady) {
     layer.filters = [new PIXI.AlphaFilter(1.0)];
@@ -237,15 +358,12 @@ function _updateDarkness(layer, entities, camX, camY) {
 
   for (let i = 0; i < entities.length; i++) {
     const e = entities[i];
-    // Duck-type: any entity with .lightsource + .position is a light source.
-    // Players carry one by default; torches, campfires, etc. will too.
     if (!e?.lightsource || !e?.position) continue;
 
     const { id, position, lightsource } = e;
     const radius = lightsource.radius;
     activeIds.add(id);
 
-    // World-space → screen-space, with optional per-entity light offset
     const sx = Math.round(position.x + (lightsource.offsetX ?? 0) - camX);
     const sy = Math.round(position.y + (lightsource.offsetY ?? 0) - camY);
 
@@ -259,8 +377,7 @@ function _updateDarkness(layer, entities, camX, camY) {
       layer.addChild(sprite);
       _lightSprites.set(id, sprite);
     } else if (sprite._cachedRadius !== radius) {
-      // Radius changed (power-up, damage, etc.) — hot-swap the texture.
-      sprite.texture = _getGradientTexture(radius);
+      sprite.texture       = _getGradientTexture(radius);
       sprite._cachedRadius = radius;
     }
 
@@ -268,7 +385,6 @@ function _updateDarkness(layer, entities, camX, camY) {
     sprite.y = sy;
   }
 
-  // Tear down sprites for entities that disappeared or lost their lightsource.
   const toRemove = [];
   for (const [id] of _lightSprites) {
     if (!activeIds.has(id)) toRemove.push(id);
@@ -277,22 +393,11 @@ function _updateDarkness(layer, entities, camX, camY) {
     const id     = toRemove[i];
     const sprite = _lightSprites.get(id);
     layer.removeChild(sprite);
-    sprite.destroy({ texture: false }); // keep the cached gradient texture alive
+    sprite.destroy({ texture: false });
     _lightSprites.delete(id);
   }
 }
 
-/**
- * Build (and permanently cache) a radial-gradient texture for `radius` px.
- *
- * Stops are tuned for "moody, not hard-clipped" (Phase 4 spec):
- *   - Bright, stable core (feels like real carried light)
- *   - Gradual mid-field fade
- *   - Soft, nearly-invisible fringe so the edge breathes rather than cuts
- *
- * @param   {number}       radius   world-space radius in pixels
- * @returns {PIXI.Texture}
- */
 function _getGradientTexture(radius) {
   const r = Math.round(radius);
   if (_gradientCache.has(r)) return _gradientCache.get(r);
@@ -305,12 +410,12 @@ function _getGradientTexture(radius) {
   const ctx  = canvas.getContext('2d');
   const grad = ctx.createRadialGradient(r, r, 0, r, r, r);
 
-  grad.addColorStop(0.00, 'rgba(255,255,255,1.00)'); // fully lit core
-  grad.addColorStop(0.35, 'rgba(255,255,255,0.97)'); // still bright near-centre
-  grad.addColorStop(0.60, 'rgba(255,255,255,0.72)'); // noticeable but gentle mid-fade
-  grad.addColorStop(0.78, 'rgba(255,255,255,0.38)'); // clearly dimming
-  grad.addColorStop(0.90, 'rgba(255,255,255,0.10)'); // just a breath of light
-  grad.addColorStop(1.00, 'rgba(255,255,255,0.00)'); // seamless edge into dark
+  grad.addColorStop(0.00, 'rgba(255,255,255,1.00)');
+  grad.addColorStop(0.35, 'rgba(255,255,255,0.97)');
+  grad.addColorStop(0.60, 'rgba(255,255,255,0.72)');
+  grad.addColorStop(0.78, 'rgba(255,255,255,0.38)');
+  grad.addColorStop(0.90, 'rgba(255,255,255,0.10)');
+  grad.addColorStop(1.00, 'rgba(255,255,255,0.00)');
 
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, diam, diam);
@@ -327,15 +432,15 @@ function _getGradientTexture(radius) {
 function _renderTilesIfNeeded(worldLayer, camX, camY) {
   if (!_tileGfx) {
     _tileGfx = new PIXI.Graphics();
-    worldLayer.addChildAt(_tileGfx, 0);
+    worldLayer.addChildAt(_tileGfx, 0);          // behind everything
   }
 
   const world = getWorldData();
   const { tiles, width, height, tileSize: ts, revision } = world;
 
-  const startX = Math.max(0,         Math.floor(camX / ts) - 1);
+  const startX = Math.max(0,          Math.floor(camX / ts) - 1);
   const endX   = Math.min(width  - 1, Math.ceil((camX + CANVAS_WIDTH)  / ts) + 1);
-  const startY = Math.max(0,         Math.floor(camY / ts) - 1);
+  const startY = Math.max(0,          Math.floor(camY / ts) - 1);
   const endY   = Math.min(height - 1, Math.ceil((camY + CANVAS_HEIGHT) / ts) + 1);
 
   const sameWindow =
@@ -376,7 +481,7 @@ function _renderTilesIfNeeded(worldLayer, camX, camY) {
 }
 
 // ---------------------------------------------------------------------------
-// Entity sprite factory
+// Graphics entity factory (pickups, legacy coloured rectangles)
 // ---------------------------------------------------------------------------
 
 function _buildEntityGfx(image) {
@@ -385,19 +490,16 @@ function _buildEntityGfx(image) {
   const highlight = _scaleColor(color, 1.5);
   const gfx       = new PIXI.Graphics();
 
-  // Drop shadow
   gfx.beginFill(0x000000, 0.25);
   gfx.drawRect(3, 4, width, height);
   gfx.endFill();
 
-  // Body + outline
   gfx.lineStyle(2, outline, 1);
   gfx.beginFill(color);
   gfx.drawRect(0, 0, width, height);
   gfx.endFill();
   gfx.lineStyle(0);
 
-  // Top highlight strip
   gfx.beginFill(highlight, 0.35);
   gfx.drawRect(3, 2, width - 6, 4);
   gfx.endFill();
